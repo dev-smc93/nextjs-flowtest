@@ -355,17 +355,22 @@ export function seedErrorEvents(collectors: Collector[]): ErrorEvent[] {
         log: offline ? `no heartbeat for ${c.lastSignalSec + j * 60}s` : pickErrorLog(),
       });
     }
-    // 달력(이력)용 과거 이벤트 2건
-    for (let k = 0; k < 2; k++) {
+    // 달력(이력)용 과거 이벤트 — 중지는 과거 이력도 풍부하게(5~10건), 오류는 2건
+    const pastN = offline ? 5 + Math.floor(Math.random() * 6) : 2;
+    for (let k = 0; k < pastN; k++) {
       seed.push({
         id: `seed-${c.id}-p${k}`,
         collectorId: c.id,
         name: c.name,
         kind: c.kind,
         status: evStatus,
-        ts: Date.now() - (1 + Math.floor(Math.random() * 29)) * 86400_000,
+        // 지난 30일 내 임의 날짜의 임의 시각으로 분산
+        ts:
+          Date.now() -
+          (1 + Math.floor(Math.random() * 29)) * 86400_000 -
+          Math.floor(Math.random() * 86400_000),
         message: offline ? "생존 신호 두절 (통신 끊김)" : "오류 발생",
-        log: offline ? "no heartbeat" : pickErrorLog(),
+        log: offline ? `no heartbeat for ${c.lastSignalSec}s` : pickErrorLog(),
       });
     }
   }

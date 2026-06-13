@@ -43,3 +43,6 @@ next-env.d.ts
 # logs
 dev.log
 *.log
+
+# local Claude Code settings (may contain secrets)
+.claude/settings.local.json

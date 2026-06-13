@@ -140,8 +140,8 @@ function GraphInner() {
     setExpanded((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
     const t = setTimeout(() => {
       try {
-        // 펼침 위치 보간(720ms)이 끝난 뒤 한 번만 부드럽게 줌 인 (자동 축소 없이 단일 이동)
-        fitView({ nodes: [{ id: focusId }], duration: 1300, maxZoom: 1.4, padding: 3 });
+        // 수집기 선택 시에는 전체가 보이도록 축소(overview) — 강조된 통신 경로를 한눈에
+        fitView({ padding: 0.12, duration: 1100 });
       } catch {}
     }, 760);
     return () => clearTimeout(t);

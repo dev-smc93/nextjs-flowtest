@@ -23,13 +23,13 @@ export function HistoryTopWidget() {
   );
   const maxErr = Math.max(1, ...topErrors.map((c) => c.errorsToday));
   const totalErrToday = collectors.reduce((s, c) => s + c.errorsToday, 0);
-  const nowErr = collectors.filter((c) => c.status === "error" || c.status === "offline").length;
+  const stoppedCount = collectors.filter((c) => c.status === "offline").length;
 
   return (
     <div className="flex h-full flex-col gap-3 p-3">
       <div className="grid shrink-0 grid-cols-3 gap-3">
         <Stat label="금일 누적 에러" value={`${totalErrToday}건`} accent="#ef4444" />
-        <Stat label="현재 이상 항목" value={`${nowErr}개`} accent="#f59e0b" />
+        <Stat label="정지된 항목" value={`${stoppedCount}개`} accent="#f59e0b" />
         <Stat label="기록된 이벤트" value={`${errorEvents.length}건`} accent="#38bdf8" />
       </div>
       <div className="border-line bg-surface flex min-h-0 flex-1 flex-col rounded-xl border">
