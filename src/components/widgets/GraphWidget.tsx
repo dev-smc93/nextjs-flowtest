@@ -9,6 +9,7 @@ import {
   MiniMap,
   useNodesState,
   useReactFlow,
+  getNodesBounds,
   type Node,
   type NodeChange,
   type NodeMouseHandler,
@@ -79,7 +80,8 @@ function GraphInner() {
   const selectedIdRef = useRef(selectedId);
   selectedIdRef.current = selectedId;
 
-  const { fitView, getViewport, setViewport, getInternalNode, setCenter } = useReactFlow();
+  const { fitView, getViewport, setViewport, getInternalNode, setCenter, getNodes } = useReactFlow();
+  const [exporting, setExporting] = useState(false);
 
   // 필터 전환 시 '수집 미들웨어'를 화면 중앙으로 이동 (레이아웃 재구성 후)
   const centerOnMiddleware = useCallback(() => {
@@ -318,6 +320,62 @@ function GraphInner() {
     return () => el.removeEventListener("wheel", onWheel);
   }, [getViewport, setViewport]);
 
+  // 현재 토폴로지를 PDF로 다운로드 (뷰포트를 이미지로 캡처 → jsPDF에 임베드)
+  const downloadPdf = useCallback(async () => {
+    const vp = wrapRef.current?.querySelector(".react-flow__viewport") as HTMLElement | null;
+    if (!vp || exporting) return;
+    setExporting(true);
+    const prev = getViewport();
+    const id = toast.loading("PDF 생성 중…");
+    try {
+      const [{ toPng }, { jsPDF }] = await Promise.all([import("html-to-image"), import("jspdf")]);
+      // 가상화(onlyRenderVisibleElements)로 화면 밖 노드는 DOM에 없으므로,
+      // 전체를 맞춰 모두 렌더되게 한 뒤 한 박자 쉬고 캡처한다.
+      fitView({ padding: 0.12, duration: 0, minZoom: 0.02 });
+      await new Promise((r) => setTimeout(r, 450));
+
+      const bounds = getNodesBounds(getNodes().filter((n) => !n.hidden));
+      const M = 48; // 이미지 여백(px)
+      const PX = Math.max(0.4, Math.min(2, 2400 / Math.max(1, bounds.width))); // 해상도 자동 조절
+      const imgW = Math.round(bounds.width * PX + M * 2);
+      const imgH = Math.round(bounds.height * PX + M * 2);
+
+      const dataUrl = await toPng(vp, {
+        backgroundColor: "#0b0e14",
+        width: imgW,
+        height: imgH,
+        style: {
+          width: `${imgW}px`,
+          height: `${imgH}px`,
+          transform: `translate(${M - bounds.x * PX}px, ${M - bounds.y * PX}px) scale(${PX})`,
+          transformOrigin: "top left",
+        },
+      });
+
+      // 전체 토폴로지를 A4 한 장에 꽉 차게(잘림 없이) 맞춤 — 비율에 따라 가로/세로 자동
+      const pdf = new jsPDF({ orientation: imgW >= imgH ? "landscape" : "portrait", unit: "pt", format: "a4" });
+      const pageW = pdf.internal.pageSize.getWidth();
+      const pageH = pdf.internal.pageSize.getHeight();
+      const margin = 24;
+      const fit = Math.min((pageW - margin * 2) / imgW, (pageH - margin * 2) / imgH);
+      const w = imgW * fit;
+      const h = imgH * fit;
+      pdf.setFillColor(11, 14, 20); // 배경(앱과 동일) 채워 여백까지 통일
+      pdf.rect(0, 0, pageW, pageH, "F");
+      pdf.addImage(dataUrl, "PNG", (pageW - w) / 2, (pageH - h) / 2, w, h);
+      const d = new Date();
+      const p2 = (n: number) => String(n).padStart(2, "0");
+      const label = VIEWS.find((x) => x.v === view)?.label ?? "전체";
+      pdf.save(`통신토폴로지_${label}_${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}.pdf`);
+      toast.success("통신 토폴로지 PDF 저장됨", { id });
+    } catch {
+      toast.error("PDF 생성 실패", { id });
+    } finally {
+      setViewport(prev, { duration: 300 });
+      setExporting(false);
+    }
+  }, [exporting, fitView, getNodes, getViewport, setViewport, view]);
+
   return (
     <div ref={wrapRef} className="relative h-full w-full">
       <ReactFlow
@@ -390,6 +448,21 @@ function GraphInner() {
             className="bg-surface border-line text-muted w-fit rounded-lg border px-3 py-1.5 text-xs font-semibold transition hover:text-red-400 active:scale-95"
           >
             ↺ 초기화
+          </button>
+          <button
+            onClick={downloadPdf}
+            disabled={exporting}
+            title="현재 통신 토폴로지를 PDF로 저장"
+            className="bg-surface border-line text-muted inline-flex w-fit items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition hover:text-sky-400 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {exporting ? (
+              <>
+                <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-sky-400 border-t-transparent" />
+                생성 중…
+              </>
+            ) : (
+              <>📄 PDF 다운로드</>
+            )}
           </button>
         </div>
       </div>
