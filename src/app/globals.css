@@ -1,26 +1,337 @@
 @import "tailwindcss";
 
+/* dark: 유틸리티가 OS 설정이 아니라 .dark 클래스를 따르도록 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* react-grid-layout 리사이즈 핸들 — 테마와 무관하게 보이도록 (기본 SVG 제거 후 코너 표시) */
+.react-resizable-handle {
+  background-image: none !important;
+}
+.react-resizable-handle::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 9px;
+  height: 9px;
+  border-right: 2px solid #0ea5e9;
+  border-bottom: 2px solid #0ea5e9;
+  border-bottom-right-radius: 2px;
+  opacity: 0.85;
+}
+
+/* 라이트(기본) */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --app: #f4f5f7;
+  --surface: #ffffff;
+  --surface2: #f1f3f5;
+  --line: #e3e6ea;
+  --text: #18181b;
+  --muted: #6b7280;
+  --grid: #e5e7eb;
+}
+/* 다크 */
+.dark {
+  --app: #09090b;
+  --surface: #18181b;
+  --surface2: #111113;
+  --line: #27272a;
+  --text: #ededed;
+  --muted: #a1a1aa;
+  --grid: #27272a;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+html,
+body {
+  height: 100%;
+  overflow: hidden; /* 앱이 내부 스크롤 영역을 직접 관리 → 브라우저 스크롤바 제거 */
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* 네이티브 스크롤바도 얇고 예쁘게 (테마 대응) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--muted) 40%, transparent);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--muted) 70%, transparent);
+  background-clip: padding-box;
+}
+body {
+  background: var(--app);
+  color: var(--text);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* 시맨틱 표면 클래스 (테마 전환 대응) */
+.bg-app { background: var(--app); }
+.bg-surface { background: var(--surface); }
+.bg-surface2 { background: var(--surface2); }
+.border-line { border-color: var(--line); }
+.text-fg { color: var(--text); }
+.text-muted { color: var(--muted); }
+
+/* 테마 전환을 부드럽게 */
+body,
+.bg-app,
+.bg-surface,
+.bg-surface2,
+.border-line {
+  transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease;
+}
+
+/* 페이지/패널 진입 애니메이션 — 조금 더 릴렉스하고 부드럽게 */
+@keyframes pageIn {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+/* ease 곡선을 부드러운 cubic-bezier(애플풍)로, 시간도 여유있게 */
+.page-enter { animation: pageIn 0.9s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.fade-in { animation: fadeIn 0.75s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* 위젯 진입 — 살짝 떠오르며 부드럽게 (페이지 전환 시 순차 등장) */
+@keyframes widgetIn {
+  from { opacity: 0; transform: translateY(16px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.widget-enter { animation: widgetIn 0.93s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* 토스트 — 상단에서 슬라이드로 등장/사라짐 (sonner 기본 전이는 끄고 키프레임으로 제어 → 깜빡임 방지) */
+@keyframes toastSlideIn {
+  from { opacity: 0; transform: translateY(-130%); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes toastSlideOut {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(-130%); }
+}
+[data-sonner-toast] { transition: none !important; }
+[data-sonner-toast][data-mounted="true"] {
+  animation: toastSlideIn 0.42s cubic-bezier(0.22, 1, 0.36, 1) both !important;
+}
+[data-sonner-toast][data-removed="true"] {
+  animation: toastSlideOut 0.32s cubic-bezier(0.4, 0, 1, 1) both !important;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-6px); }
+  75% { transform: translateX(6px); }
+}
+
+/* 입체감(앞으로 볼록): 부드러운 그림자 + 살짝 떠오름 */
+.card-3d {
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06), 0 8px 20px rgba(0, 0, 0, 0.1);
+}
+.dark .card-3d {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 10px 28px rgba(0, 0, 0, 0.5);
+}
+/* 버튼 입체감(볼록) — 헤더/컨트롤 통일 */
+.btn-3d {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 1px 2px rgba(0, 0, 0, 0.12);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background-color 0.15s ease;
+}
+.dark .btn-3d {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 2px 5px rgba(0, 0, 0, 0.4);
+}
+.btn-3d:hover {
+  transform: translateY(-1px);
+}
+.btn-3d:active {
+  transform: translateY(0) scale(0.97);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.25);
+}
+
+.elevate {
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.elevate:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.12), 0 14px 34px rgba(0, 0, 0, 0.16);
+}
+
+/* 대시보드 새로고침 진행바 */
+@keyframes refillBar {
+  from { width: 0%; }
+  to { width: 100%; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+/* 자동 갱신 아이콘 — 대부분 정지, 주기 끝에서 빠르게 한 바퀴 */
+@keyframes refreshTick {
+  0%, 84% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* 가이드 미리보기 모션 */
+@keyframes dashFlow { to { stroke-dashoffset: -16; } }
+.flow-line { animation: dashFlow 0.9s linear infinite; }
+@keyframes slideKnob {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(0.75rem); }
+}
+@keyframes wiggle {
+  0%, 100% { transform: rotate(0); }
+  25% { transform: rotate(-12deg); }
+  75% { transform: rotate(12deg); }
+}
+@keyframes blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+/* 수치 변동 강조 */
+@keyframes pop {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.18); filter: brightness(1.3); }
+  100% { transform: scale(1); }
+}
+.pop { animation: pop 0.45s ease-out; }
+
+/* react-day-picker 테마 */
+.rdp-root {
+  --rdp-accent-color: #0ea5e9;
+  --rdp-accent-background-color: rgba(14, 165, 233, 0.16);
+  --rdp-range_middle-background-color: rgba(14, 165, 233, 0.16);
+  --rdp-range_start-color: #fff;
+  --rdp-range_end-color: #fff;
+  --rdp-selected-border: 2px solid #0ea5e9;
+  --rdp-today-color: #38bdf8;
+  --rdp-day-height: 34px;
+  --rdp-day-width: 34px;
+  --rdp-day_button-height: 32px;
+  --rdp-day_button-width: 32px;
+  font-size: 12px;
+  color: var(--text);
+}
+.rdp-chevron {
+  fill: #0ea5e9;
+}
+/* 범위 중간 — 다크에서 흰 배경으로 뜨지 않게 */
+.rdp-range_middle {
+  background-color: rgba(14, 165, 233, 0.16) !important;
+}
+.rdp-range_middle .rdp-day_button {
+  color: var(--text) !important;
+}
+.rdp-range_start .rdp-day_button,
+.rdp-range_end .rdp-day_button {
+  background-color: #0ea5e9 !important;
+  color: #fff !important;
+}
+.rdp-day_button:hover {
+  background-color: rgba(14, 165, 233, 0.25) !important;
+}
+
+/* 뉴스 티커 (좌→우 흐름) */
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.marquee-track {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  will-change: transform;
+  animation: marquee 40s linear infinite;
+}
+.marquee-track:hover {
+  animation-play-state: paused;
+}
+
+/* 사이드바 — 애플풍 엠보싱(은은한 그라데이션 + 안쪽 하이라이트 + 부드러운 그림자) */
+.sidebar {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 88%, #fff 12%), var(--surface));
+  box-shadow:
+    inset -1px 0 0 var(--line),
+    inset 1px 0 0 rgba(255, 255, 255, 0.5),
+    3px 0 14px rgba(0, 0, 0, 0.08);
+}
+.dark .sidebar {
+  background: linear-gradient(180deg, #1e1e22, #161618);
+  box-shadow:
+    inset -1px 0 0 #2b2b30,
+    inset 1px 0 0 rgba(255, 255, 255, 0.05),
+    4px 0 18px rgba(0, 0, 0, 0.5);
+}
+/* 사이드바 활성 항목 — 살짝 떠오른 알약 */
+.nav-active {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 2px 6px rgba(14, 165, 233, 0.25);
+}
+
+/* 패널/위젯 헤더 — 입체적 그라데이션 + 하단 하이라이트 */
+.panel-head {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 86%, #fff 0%), var(--surface2));
+  box-shadow: inset 0 -1px 0 var(--line), 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+.dark .panel-head {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 70%, #fff 6%), var(--surface));
+  box-shadow: inset 0 -1px 0 var(--line), 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+/* 장애/끊김 노드 뒤에서 숨쉬듯 깜빡이는 불빛 (opacity만 → GPU 합성, 블러 재래스터 없음) */
+@keyframes statusBreathe {
+  0%,
+  100% {
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 0.6;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+.status-glow {
+  animation: statusBreathe 2.2s ease-in-out infinite;
+  will-change: opacity;
+}
+
+/* 펼칠 때 새로 나타나는 카드 페이드인 */
+@keyframes nodeEnter {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.node-enter {
+  animation: nodeEnter 260ms ease-out both;
+}
+
+/* 폼 입력 공통 스타일 (테마 대응, 폭은 호출부에서 지정) */
+.inp {
+  border-radius: 0.375rem;
+  border: 1px solid var(--line);
+  background: var(--surface2);
+  padding: 0.375rem 0.625rem;
+  font-size: 0.75rem;
+  color: var(--text);
+  outline: none;
+}
+.inp:focus {
+  border-color: #0ea5e9;
 }
