@@ -328,51 +328,55 @@ export const DEFAULT_ALERT: AlertConfig = {
   excludeKeywords: ["일시적", "429", "재시도"], // 기본: 일시적/레이트리밋 제외
 };
 
-// 시작 시 에러/중지 이력 시드 — 현재 이상 + 금일 에러가 있던(복구된) 수집기까지.
-// 오류: errorsToday와 1:1 일치, 중지: 끊김/재접속 반복 2~9건(샘플).
+// 시작 시 에러/중지 이력 시드.
+// 각 대상에 오류+정지 이벤트를 '혼합'해 생성 → 정상 상태 수집기도 금일 정지(복구) 이력을 가질 수 있음.
 export function seedErrorEvents(collectors: Collector[]): ErrorEvent[] {
-  const targets = collectors
-    .filter((c) => c.status === "error" || c.status === "offline" || c.errorsToday > 0)
-    .slice(0, 50);
+  const base = collectors.filter(
+    (c) => c.status === "error" || c.status === "offline" || c.errorsToday > 0
+  );
+  // 정상이지만 금일 정지(끊겼다 복구됨) 이력을 가진 수집기 일부 포함
+  const recovered = collectors
+    .filter((c) => c.status === "normal" && c.errorsToday === 0)
+    .filter((_, i) => i % 6 === 0)
+    .slice(0, 16);
+  const targets = [...base, ...recovered].slice(0, 70);
+
   const seed: ErrorEvent[] = [];
   const dayStart = new Date().setHours(0, 0, 0, 0);
   const elapsedToday = Math.max(1, Date.now() - dayStart);
+  const rand = (n: number) => Math.floor(Math.random() * n);
+
+  const add = (c: Collector, status: CollectorStatus, idx: number, ts: number) => {
+    const offline = status === "offline";
+    seed.push({
+      id: `seed-${c.id}-${status}-${idx}`,
+      collectorId: c.id,
+      name: c.name,
+      kind: c.kind,
+      status,
+      ts: Math.min(ts, Date.now()),
+      message: offline ? `생존 신호 두절 — 재접속 실패 (#${idx + 1})` : `오류 발생 (#${idx + 1})`,
+      log: offline ? `no heartbeat for ${c.lastSignalSec + idx * 60}s` : pickErrorLog(),
+    });
+  };
+
   for (const c of targets) {
-    const offline = c.status === "offline";
-    const evStatus: CollectorStatus = offline ? "offline" : "error";
-    const todayN = offline ? 2 + Math.floor(Math.random() * 8) : Math.max(c.errorsToday, 1);
-    for (let j = 0; j < todayN; j++) {
-      // 하루에 고르게 분포 (최신순 정렬 시 보기 좋게)
-      const ts = dayStart + Math.floor((elapsedToday * (j + 0.5)) / todayN) + Math.floor(Math.random() * 90_000);
-      seed.push({
-        id: `seed-${c.id}-t${j}`,
-        collectorId: c.id,
-        name: c.name,
-        kind: c.kind,
-        status: evStatus,
-        ts: Math.min(ts, Date.now()),
-        message: offline ? `생존 신호 두절 — 재접속 실패 (#${j + 1})` : `오류 발생 (#${j + 1})`,
-        log: offline ? `no heartbeat for ${c.lastSignalSec + j * 60}s` : pickErrorLog(),
-      });
-    }
-    // 달력(이력)용 과거 이벤트 — 중지는 과거 이력도 풍부하게(5~10건), 오류는 2건
-    const pastN = offline ? 5 + Math.floor(Math.random() * 6) : 2;
-    for (let k = 0; k < pastN; k++) {
-      seed.push({
-        id: `seed-${c.id}-p${k}`,
-        collectorId: c.id,
-        name: c.name,
-        kind: c.kind,
-        status: evStatus,
-        // 지난 30일 내 임의 날짜의 임의 시각으로 분산
-        ts:
-          Date.now() -
-          (1 + Math.floor(Math.random() * 29)) * 86400_000 -
-          Math.floor(Math.random() * 86400_000),
-        message: offline ? "생존 신호 두절 (통신 끊김)" : "오류 발생",
-        log: offline ? `no heartbeat for ${c.lastSignalSec}s` : pickErrorLog(),
-      });
-    }
+    // 금일 오류 건수: errorsToday 반영 (error 상태인데 0이면 최소 3건)
+    const errN = c.errorsToday > 0 ? c.errorsToday : c.status === "error" ? 3 + rand(5) : 0;
+    // 금일 정지 건수: 중지 상태는 많이, 그 외(정상/오류)도 일부 발생(복구 이력)
+    const offN = c.status === "offline" ? 2 + rand(8) : Math.random() < 0.55 ? 1 + rand(4) : 0;
+    const todayTotal = Math.max(errN + offN, 1);
+    let k = 0;
+    const tsAt = () => dayStart + Math.floor((elapsedToday * (k++ + 0.5)) / todayTotal) + rand(60_000);
+    for (let j = 0; j < errN; j++) add(c, "error", j, tsAt());
+    for (let j = 0; j < offN; j++) add(c, "offline", j, tsAt());
+
+    // 달력(기간)용 과거 이력 — 오류/정지 혼합, 정지는 풍부하게
+    const pastTs = () => Date.now() - (1 + rand(29)) * 86400_000 - rand(86400_000);
+    const pastErr = c.status === "offline" ? 1 : 2;
+    const pastOff = c.status === "offline" ? 5 + rand(6) : 1 + rand(3);
+    for (let j = 0; j < pastErr; j++) add(c, "error", 100 + j, pastTs());
+    for (let j = 0; j < pastOff; j++) add(c, "offline", 200 + j, pastTs());
   }
   seed.sort((a, b) => b.ts - a.ts);
   return seed;
@@ -465,6 +469,28 @@ export function injectFaultInto(prev: Collector[]): { next: Collector[]; event: 
     ts: Date.now(),
     message: "수동 장애 주입",
     log: "manual fault injection (test)",
+  };
+  return { next, event };
+}
+
+// 수동 정지(끊김) 주입 (테스트 버튼) — 정상 동작 중인 수집기 우선 대상
+export function injectOfflineInto(prev: Collector[]): { next: Collector[]; event: ErrorEvent } {
+  const pool = prev.filter((c) => c.status !== "offline");
+  const target = (pool.length ? pool : prev)[Math.floor(Math.random() * (pool.length || prev.length))];
+  const next = prev.map((c) =>
+    c.id === target.id
+      ? { ...c, status: "offline" as CollectorStatus, lastSignalSec: c.intervalSec * 25 }
+      : c
+  );
+  const event: ErrorEvent = {
+    id: `${target.id}-${Date.now()}-off`,
+    collectorId: target.id,
+    name: target.name,
+    kind: target.kind,
+    status: "offline",
+    ts: Date.now(),
+    message: "수동 정지 주입 (통신 끊김)",
+    log: "manual offline injection (test)",
   };
   return { next, event };
 }

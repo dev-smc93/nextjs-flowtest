@@ -367,39 +367,12 @@ export function buildEdges(
     }
   }
 
-  // 단일 수집기 카드: 서버 박스가 없어 선이 끊겨 보이므로, 카드 → 대역(밴드)으로 직접 연결
-  // (대역 → 미들웨어 트렁크로 이어져 전체 흐름이 보이게 함)
-  for (const g of groups) {
-    if (g.members.length !== 1) continue;
-    if (g.kind === "collector" ? !showC : !showP) continue;
-    const bandId = `band-${g.kind}-${bandOf(g)}`;
-    if (collapsedBands.has(bandId)) continue; // 대역 접힘 → 카드 없음
-    const c = g.members[0];
-    const isProc = g.kind === "dbproc";
-    const p = edgeProps(c.status);
-    edges.push({
-      id: `link-${c.id}`,
-      source: isProc ? bandId : c.id,
-      sourceHandle: isProc ? "z" : "T",
-      target: isProc ? c.id : bandId,
-      targetHandle: isProc ? "T" : "z",
-      type: "directed",
-      animated: p.animated,
-      style: {
-        stroke: STATUS_META[c.status].color,
-        strokeWidth: c.status === "normal" ? 1.5 : 2,
-        strokeDasharray: p.dash,
-        opacity: p.opacity,
-      },
-    });
-  }
-
-  // 선택된 수집기의 통신 경로만 강조 (멤버선/단일링크 + 해당 대역 트렁크), 나머지는 흐리게
+  // 선택된 수집기의 통신 경로만 강조 (멤버선 + 해당 대역 트렁크), 나머지는 흐리게
   if (selectedId) {
     const sel = collectors.find((c) => c.id === selectedId);
     if (sel) {
       const trunkId = `e-band-${sel.kind}-${bandKey(sel.externalIp)}`;
-      const hot = new Set([trunkId, `e-${sel.id}`, `link-${sel.id}`]);
+      const hot = new Set([trunkId, `e-${sel.id}`]);
       return edges.map((e) =>
         hot.has(e.id)
           ? {

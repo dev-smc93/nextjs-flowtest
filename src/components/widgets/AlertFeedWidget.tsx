@@ -100,6 +100,9 @@ function AlertRow({
   const meta = STATUS_META[c.status];
   const alarming = c.status === "error" || c.status === "offline";
   const rep = events[0];
+  // 금일 오류/정지 건수 분리 (배지 색을 종류에 맞춰 표시 → 정상 복구 항목이 빨갛게 오해되지 않도록)
+  const errN = events.filter((e) => e.status !== "offline").length;
+  const offN = events.length - errN;
 
   return (
     <li
@@ -115,9 +118,16 @@ function AlertRow({
           <div className="flex items-center gap-1.5">
             <span className={`text-[9px] text-muted transition-transform ${open ? "" : "-rotate-90"}`}>▾</span>
             <span className="truncate text-xs font-semibold text-fg">{c.name}</span>
-            <span className="shrink-0 rounded-full bg-red-500/15 px-1.5 text-[9px] font-bold text-red-300">
-              금일 {events.length}건
-            </span>
+            {errN > 0 && (
+              <span className="shrink-0 rounded-full bg-red-500/15 px-1.5 text-[9px] font-bold text-red-300">
+                오류 {errN}
+              </span>
+            )}
+            {offN > 0 && (
+              <span className="shrink-0 rounded-full bg-amber-500/15 px-1.5 text-[9px] font-bold text-amber-300">
+                정지 {offN}
+              </span>
+            )}
           </div>
           <div className="truncate pl-3 text-[10px] text-muted">{rep ? rep.message : bandKey(c.externalIp)}</div>
         </div>

@@ -24,11 +24,22 @@ function highlight(text: string, q: string) {
 }
 
 export default function TableWidget() {
-  const { collectors, mutedIds, toggleMute, focusCollector, statusFilter, setStatusFilter, focusId } =
+  const { collectors, errorEvents, mutedIds, toggleMute, focusCollector, statusFilter, setStatusFilter, focusId } =
     useCollectors();
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("status");
   const [asc, setAsc] = useState(false);
+
+  // 금일 정지(끊김) 횟수 — errorEvents에서 수집기별 집계
+  const offlineToday = useMemo(() => {
+    const todayStart = new Date().setHours(0, 0, 0, 0);
+    const m = new Map<string, number>();
+    for (const e of errorEvents) {
+      if (e.ts < todayStart || e.status !== "offline") continue;
+      m.set(e.collectorId, (m.get(e.collectorId) ?? 0) + 1);
+    }
+    return m;
+  }, [errorEvents]);
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -91,6 +102,7 @@ export default function TableWidget() {
               <Th label="주기" k="intervalSec" {...{ sortKey, asc, toggleSort }} />
               <Th label="최근 신호" k="lastSignalSec" {...{ sortKey, asc, toggleSort }} />
               <Th label="에러" k="errorsToday" {...{ sortKey, asc, toggleSort }} />
+              <th className="px-3 py-2 font-medium">정지</th>
               <th className="px-3 py-2 font-medium">외부/내부 IP</th>
               <th className="px-2 py-2 text-center font-medium">알림</th>
             </tr>
@@ -103,6 +115,7 @@ export default function TableWidget() {
                 q={query.trim()}
                 muted={mutedIds.has(c.id)}
                 selected={focusId === c.id}
+                offlineCount={offlineToday.get(c.id) ?? 0}
                 onMute={() => {
                   const was = mutedIds.has(c.id);
                   toggleMute(c.id);
@@ -151,6 +164,7 @@ function Row({
   q,
   muted,
   selected,
+  offlineCount,
   onMute,
   onFocus,
 }: {
@@ -158,6 +172,7 @@ function Row({
   q: string;
   muted: boolean;
   selected: boolean;
+  offlineCount: number;
   onMute: () => void;
   onFocus: () => void;
 }) {
@@ -247,6 +262,13 @@ function Row({
       <td className="px-3 py-2">
         {c.errorsToday > 0 ? (
           <span className="font-semibold text-red-400">{c.errorsToday}건</span>
+        ) : (
+          <span className="text-muted">-</span>
+        )}
+      </td>
+      <td className="px-3 py-2">
+        {offlineCount > 0 ? (
+          <span className="font-semibold text-amber-400">{offlineCount}건</span>
         ) : (
           <span className="text-muted">-</span>
         )}

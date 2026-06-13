@@ -37,7 +37,7 @@ export type WidgetDef = {
 const FULL = { w: 12, h: 18, minW: 6, minH: 8 };
 
 export const WIDGET_CATALOG: WidgetDef[] = [
-  { id: "graph", title: "통신 그래프", icon: "🛰️", render: () => <GraphWidget />, def: { w: 8, h: 15, minW: 4, minH: 8 } },
+  { id: "graph", title: "통신 토폴로지", icon: "🛰️", render: () => <GraphWidget />, def: { w: 8, h: 15, minW: 4, minH: 8 } },
   { id: "summary", title: "상태 요약", icon: "📊", render: () => <SummaryWidget />, def: { w: 12, h: 4, minW: 3, minH: 3 } },
   { id: "alertsFeed", title: "금일 장애·중지", icon: "🚨", render: () => <AlertFeedWidget />, def: { w: 4, h: 9, minW: 3, minH: 5 } },
   { id: "cli", title: "수집 및 적재 현황", icon: "🖥️", render: () => <CliWidget />, def: { w: 7, h: 9, minW: 4, minH: 5 } },

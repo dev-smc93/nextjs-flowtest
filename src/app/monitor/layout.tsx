@@ -29,6 +29,21 @@ function ThemedToaster() {
   );
 }
 
+// 모바일(작은 화면) 미지원 안내 — md(768px) 미만에서 전체 화면을 덮음
+function MobileBlock() {
+  return (
+    <div className="bg-app fixed inset-0 z-[9999] flex flex-col items-center justify-center gap-3 p-8 text-center md:hidden">
+      <div className="text-5xl">🖥️</div>
+      <div className="text-fg text-lg font-bold">모바일 화면에서는 지원하지 않습니다</div>
+      <div className="text-muted text-sm leading-relaxed">
+        CollectOps 콘솔은 데스크톱 환경에 최적화되어 있습니다.
+        <br />
+        가로 768px 이상 화면에서 이용해 주세요.
+      </div>
+    </div>
+  );
+}
+
 export default function MonitorLayout({ children }: { children: React.ReactNode }) {
   return (
     <ThemeProvider>
@@ -38,6 +53,7 @@ export default function MonitorLayout({ children }: { children: React.ReactNode 
           <AppShell>{children}</AppShell>
         </CollectorsProvider>
       </AuthGate>
+      <MobileBlock />
     </ThemeProvider>
   );
 }

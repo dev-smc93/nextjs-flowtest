@@ -65,7 +65,7 @@ const VIEWS: { v: GraphView; label: string; icon: string }[] = [
 ];
 
 function GraphInner() {
-  const { collectors, resetNonce, focusId, focusNonce, mwOk, reset } = useCollectors();
+  const { collectors, resetNonce, focusId, focusNonce, focusCollector, mwOk, reset } = useCollectors();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [collapsedBands, setCollapsedBands] = useState<Set<string>>(new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -137,13 +137,13 @@ function GraphInner() {
     const key = c.kind === "dbproc" ? `proc:${c.externalIp}` : c.externalIp;
     setView("all");
     setSelectedId(focusId);
+    // 카드가 보이도록 그룹 펼친 뒤, 펼침 보간(720ms)이 끝나면 해당 수집기로 확대(zoom in)
     setExpanded((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
     const t = setTimeout(() => {
       try {
-        // 수집기 선택 시에는 전체가 보이도록 축소(overview) — 강조된 통신 경로를 한눈에
-        fitView({ padding: 0.12, duration: 1100 });
+        fitView({ nodes: [{ id: focusId }], duration: 900, maxZoom: 1.5, padding: 3 });
       } catch {}
-    }, 760);
+    }, 780);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusNonce]);
@@ -236,8 +236,11 @@ function GraphInner() {
         next.has(key) ? next.delete(key) : next.add(key);
         return next;
       });
-    } else if (node.type === "collector") setSelectedId(node.id);
-  }, []);
+    } else if (node.type === "collector") {
+      // 목록 클릭과 동일하게: 선택 + 해당 수집기로 확대
+      focusCollector(node.id);
+    }
+  }, [focusCollector]);
   const onPaneClick = useCallback(() => setSelectedId(null), []);
 
   // 미니맵: 선택된 수집기의 통신 경로(수집기→그룹→대역→미들웨어)만 밝게, 나머지는 흐리게

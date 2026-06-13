@@ -8,52 +8,14 @@ import { ClipLoader } from "react-spinners";
 import { useCollectors } from "@/lib/collectorsContext";
 import { useTheme } from "@/lib/theme";
 import { BoardChromeProvider, useBoardChrome } from "@/lib/boardChrome";
+import { DEFAULT_NAV_GROUPS, loadNavGroups, NAV_ORDER_EVENT, type NavGroup } from "@/lib/nav";
 import { Modal } from "@/components/ui";
-
-type NavItem = { href: string; label: string; icon: string };
-type NavGroup = { id: string; label: string; icon: string; items: NavItem[] };
-
-const NAV_GROUPS: NavGroup[] = [
-  {
-    id: "monitoring",
-    label: "모니터링",
-    icon: "🖥️",
-    items: [
-      { href: "/monitor", label: "대시보드", icon: "📊" },
-      { href: "/monitor/charts", label: "추이 차트", icon: "📈" },
-      { href: "/monitor/history", label: "에러/정지 이력", icon: "🧾" },
-    ],
-  },
-  {
-    id: "ops",
-    label: "알림 · 일정",
-    icon: "🔔",
-    items: [
-      { href: "/monitor/alerts", label: "알림톡 설정", icon: "💬" },
-      { href: "/monitor/schedule", label: "점검 일정", icon: "🗓️" },
-    ],
-  },
-  {
-    id: "manage",
-    label: "관리",
-    icon: "🗂️",
-    items: [
-      { href: "/monitor/collectors", label: "수집기 관리", icon: "📁" },
-      { href: "/monitor/widgets", label: "위젯 관리", icon: "🧩" },
-    ],
-  },
-  {
-    id: "help",
-    label: "도움말",
-    icon: "❓",
-    items: [{ href: "/monitor/guide", label: "사용 방법", icon: "📖" }],
-  },
-];
 
 const TITLES: Record<string, string> = {
   "/monitor": "대시보드",
   "/monitor/charts": "에러·중지 추이 차트",
   "/monitor/widgets": "위젯 관리",
+  "/monitor/nav": "메뉴 편집",
   "/monitor/history": "에러 / 정지(끊김) 이력",
   "/monitor/alerts": "알림톡 설정",
   "/monitor/schedule": "점검 일정 (Cron)",
@@ -71,14 +33,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
 function AppShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { injectFault, mwOk, mwTesting, testMiddleware } = useCollectors();
+  const { injectFault, injectOffline, mwOk, mwTesting, testMiddleware } = useCollectors();
   const { theme, toggle } = useTheme();
   const { editing, toggleEditing, boardActive, resetCurrent } = useBoardChrome();
   const [now, setNow] = useState("");
   const [collapsed, setCollapsed] = useState(true);
   const [logoutOpen, setLogoutOpen] = useState(false);
+  // 사용자 지정 순서가 적용된 네비게이션 (메뉴 편집 페이지에서 변경 가능)
+  const [navGroups, setNavGroups] = useState<NavGroup[]>(DEFAULT_NAV_GROUPS);
   const [openGroups, setOpenGroups] = useState<Set<string>>(
-    () => new Set(NAV_GROUPS.map((g) => g.id))
+    () => new Set(DEFAULT_NAV_GROUPS.map((g) => g.id))
   );
   const toggleGroup = (id: string) =>
     setOpenGroups((prev) => {
@@ -104,6 +68,14 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
     // 시간은 자동 갱신 바(10초)가 한 바퀴 돌 때마다 갱신
     const t = setInterval(() => setNow(fmt()), 10000);
     return () => clearInterval(t);
+  }, []);
+
+  // 저장된 사이드바 순서 적용 + 편집 시 실시간 반영
+  useEffect(() => {
+    const load = () => setNavGroups(loadNavGroups());
+    load();
+    window.addEventListener(NAV_ORDER_EVENT, load);
+    return () => window.removeEventListener(NAV_ORDER_EVENT, load);
   }, []);
 
   const toggleNav = () =>
@@ -171,7 +143,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
           </div>
         </div>
         <nav className="flex-1 space-y-1 overflow-y-auto overflow-x-hidden p-2">
-          {NAV_GROUPS.map((g) => {
+          {navGroups.map((g) => {
             const open = collapsed || openGroups.has(g.id);
             return (
               <div key={g.id}>
@@ -281,6 +253,15 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
               className="btn-3d rounded-lg bg-red-500/15 px-3 py-1.5 text-xs font-semibold text-red-400 ring-1 ring-red-500/40 hover:bg-red-500/25"
             >
               장애 주입
+            </button>
+            <button
+              onClick={() => {
+                injectOffline();
+                toast.warning("정지 주입됨", { description: "임의 수집기 통신 끊김" });
+              }}
+              className="btn-3d rounded-lg bg-amber-500/15 px-3 py-1.5 text-xs font-semibold text-amber-400 ring-1 ring-amber-500/40 hover:bg-amber-500/25"
+            >
+              정지 주입
             </button>
             {/* 레이아웃 잠금/편집 — 현재 페이지(보드)에만 적용 */}
             {boardActive && (

@@ -19,6 +19,7 @@ import {
   DEFAULT_ALERT,
   INITIAL_COLLECTORS,
   injectFaultInto,
+  injectOfflineInto,
   mockMiddlewareOk,
   mockSendResult,
   seedConfigs,
@@ -89,6 +90,7 @@ type CollectorsCtx = {
   live: boolean;
   setLive: (v: boolean | ((p: boolean) => boolean)) => void;
   injectFault: () => void;
+  injectOffline: () => void;
   reset: () => void;
   resetNonce: number;
   mutedIds: Set<string>;
@@ -231,6 +233,12 @@ export function CollectorsProvider({ children }: { children: ReactNode }) {
     setErrorEvents((p) => [event, ...p].slice(0, 400));
   };
 
+  const injectOffline = () => {
+    const { next, event } = injectOfflineInto(collectorsRef.current);
+    setCollectors(next);
+    setErrorEvents((p) => [event, ...p].slice(0, 400));
+  };
+
   const reset = () => {
     setCollectors(INITIAL_COLLECTORS);
     setMutedIds(seedMuted());
@@ -249,6 +257,7 @@ export function CollectorsProvider({ children }: { children: ReactNode }) {
         live,
         setLive,
         injectFault,
+        injectOffline,
         reset,
         resetNonce,
         mutedIds,
