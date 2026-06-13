@@ -2,7 +2,8 @@
 
 export type CollectorStatus = "normal" | "error" | "offline";
 
-export type CollectorType = "API" | "Agent" | "PROC";
+// 수집기(→미들웨어)=API, DB프로시저(미들웨어→)=Agent
+export type CollectorType = "API" | "Agent";
 
 // 통신 방향 구분: collector = 수집기→미들웨어, dbproc = 미들웨어→DB프로시저
 export type CollectorKind = "collector" | "dbproc";

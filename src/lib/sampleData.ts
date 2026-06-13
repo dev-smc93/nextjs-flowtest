@@ -130,11 +130,11 @@ const FEATURED_COLLECTORS: Omit<
   { id: "c5", name: "경매수집기A(14대)", project: "AuctionAllCollector_2025", type: "API", importance: "높음", intervalSec: 30, lastSignalSec: 5, externalIp: "222.112.141.6", internalIp: "192.168.1.3", errorsToday: 0, status: "normal" },
   { id: "c6", name: "경매수집기B(17대)", project: "AuctionAllCollector_2025", type: "API", importance: "높음", intervalSec: 30, lastSignalSec: 26, externalIp: "125.141.35.245", internalIp: "192.168.2.2", errorsToday: 0, status: "normal" },
   { id: "c7", name: "경매수집기C(17대)", project: "AuctionAllCollector_2025", type: "API", importance: "높음", intervalSec: 30, lastSignalSec: 24, externalIp: "222.112.141.21", internalIp: "192.168.3.2", errorsToday: 0, status: "normal" },
-  { id: "c8", name: "네이버부동산수집기(다가구)", project: "naver_estate_agent", type: "Agent", importance: "중간", intervalSec: 60, lastSignalSec: 75, externalIp: "211.234.20.10", internalIp: "192.168.4.7", errorsToday: 2, status: "error" },
-  { id: "c9", name: "법원경매공고크롤러", project: "court_notice_agent", type: "Agent", importance: "높음", intervalSec: 30, lastSignalSec: 240, externalIp: "118.235.7.42", internalIp: "192.168.5.11", errorsToday: 14, status: "error" },
-  { id: "c10", name: "지적도이미지수집기", project: "cadastral_image", type: "Agent", importance: "낮음", intervalSec: 120, lastSignalSec: 1830, externalIp: "39.115.8.200", internalIp: "192.168.6.21", errorsToday: 0, status: "offline" },
+  { id: "c8", name: "네이버부동산수집기(다가구)", project: "naver_estate_agent", type: "API", importance: "중간", intervalSec: 60, lastSignalSec: 75, externalIp: "211.234.20.10", internalIp: "192.168.4.7", errorsToday: 2, status: "error" },
+  { id: "c9", name: "법원경매공고크롤러", project: "court_notice_agent", type: "API", importance: "높음", intervalSec: 30, lastSignalSec: 240, externalIp: "118.235.7.42", internalIp: "192.168.5.11", errorsToday: 14, status: "error" },
+  { id: "c10", name: "지적도이미지수집기", project: "cadastral_image", type: "API", importance: "낮음", intervalSec: 120, lastSignalSec: 1830, externalIp: "39.115.8.200", internalIp: "192.168.6.21", errorsToday: 0, status: "offline" },
   { id: "c11", name: "실거래가동기화", project: "rtms_sync", type: "API", importance: "중간", intervalSec: 60, lastSignalSec: 12, externalIp: "203.241.18.9", internalIp: "192.168.7.5", errorsToday: 0, status: "normal" },
-  { id: "c12", name: "위성영상수집기", project: "satellite_image", type: "Agent", importance: "중간", intervalSec: 300, lastSignalSec: 95, externalIp: "175.223.40.1", internalIp: "192.168.8.9", errorsToday: 1, status: "error" },
+  { id: "c12", name: "위성영상수집기", project: "satellite_image", type: "API", importance: "중간", intervalSec: 300, lastSignalSec: 95, externalIp: "175.223.40.1", internalIp: "192.168.8.9", errorsToday: 1, status: "error" },
 ];
 
 function generateCollectors(count: number): Collector[] {
@@ -164,7 +164,7 @@ function generateCollectors(count: number): Collector[] {
       kind: "collector",
       name: `${prefix}${letter}(${1 + Math.floor(rng() * 20)}대)`,
       project: PROJECTS[Math.floor(rng() * PROJECTS.length)],
-      type: rng() < 0.6 ? "API" : "Agent",
+      type: "API", // 수집기 → 미들웨어 = API
       importance: IMPORTANCES[Math.floor(rng() * (rng() < 0.5 ? 1 : IMPORTANCES.length))],
       intervalSec,
       lastSignalSec,
@@ -213,7 +213,7 @@ function generateDbProcs(count: number): Collector[] {
       kind: "dbproc",
       name: `usp_${PROC_NAMES[i % PROC_NAMES.length]}`,
       project: srv.db,
-      type: "PROC",
+      type: "Agent", // 미들웨어 → DB프로시저 = Agent
       importance: IMPORTANCES[Math.floor(rng() * (rng() < 0.5 ? 1 : IMPORTANCES.length))],
       intervalSec,
       lastSignalSec,
@@ -237,26 +237,24 @@ function generateVirtual(count: number): Collector[] {
   for (let i = 0; i < count; i++) {
     const host = 2 + Math.floor(i / 2); // 일부는 같은 가상 노드(IP) 공유
     const intervalSec = [10, 30, 60][Math.floor(rng() * 3)];
-    const status = pickStatus(rng());
-    let lastSignalSec: number;
-    if (status === "normal") lastSignalSec = Math.floor(rng() * intervalSec);
-    else if (status === "error") lastSignalSec = Math.floor(intervalSec * (3.5 + rng() * 6));
-    else lastSignalSec = Math.floor(intervalSec * (25 + rng() * 30));
+    // 가상 = 미실행: 전일 미복구 정지가 자정을 넘겨 잡힌 항목 → 항상 offline, 수집 0
+    const lastSignalSec = Math.floor(intervalSec * (30 + rng() * 40));
     out.push({
       id: `v${i + 1}`,
       kind: "collector",
       virtual: true,
       name: `${VIRTUAL_NAMES[i % VIRTUAL_NAMES.length]}${String.fromCharCode(65 + i)}`,
       project: "in_memory_agg",
-      type: rng() < 0.5 ? "API" : "Agent",
+      type: "API", // 가상도 수집기(→미들웨어) = API
       importance: IMPORTANCES[Math.floor(rng() * IMPORTANCES.length)],
       intervalSec,
       lastSignalSec,
       externalIp: `10.255.0.${host}`,
       internalIp: `10.255.0.${host}`,
-      errorsToday: status === "error" ? 1 + Math.floor(rng() * 8) : 0,
-      status,
+      errorsToday: 0,
+      status: "offline",
       ...seedProgress(rng),
+      collectedToday: 0,
     });
   }
   return out;
@@ -390,6 +388,7 @@ export function tickCollectors(prev: Collector[]): { next: Collector[]; events: 
   const now = Date.now();
 
   const next = prev.map((c) => {
+    if (c.virtual) return c; // 미실행(가상)은 복구되지 않고 그대로 유지
     let lastSignalSec = c.lastSignalSec + 2;
     let status = c.status;
     let errorsToday = c.errorsToday;

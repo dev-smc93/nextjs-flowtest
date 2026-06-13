@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import Scroll from "@/components/Scroll";
 import {
@@ -11,32 +11,40 @@ import {
   type NavGroup,
 } from "@/lib/nav";
 
+type Drag = { type: "group"; gi: number } | { type: "item"; gi: number; ii: number } | null;
+
 export default function NavEditorPage() {
   const [groups, setGroups] = useState<NavGroup[]>(DEFAULT_NAV_GROUPS);
+  const groupsRef = useRef(groups);
+  groupsRef.current = groups;
+  const dragRef = useRef<Drag>(null);
+  const [dragKey, setDragKey] = useState<string | null>(null);
 
   useEffect(() => setGroups(loadNavGroups()), []);
 
-  // 변경 즉시 저장 → 좌측 사이드바에 실시간 반영
-  const commit = (next: NavGroup[]) => {
-    setGroups(next);
-    saveNavOrder(next);
-  };
+  // 드래그 중 실시간 재정렬 (저장은 dragEnd에서)
+  const moveGroup = (from: number, to: number) =>
+    setGroups((prev) => {
+      if (from === to || to < 0 || to >= prev.length) return prev;
+      const n = [...prev];
+      const [g] = n.splice(from, 1);
+      n.splice(to, 0, g);
+      return n;
+    });
+  const moveItem = (gi: number, from: number, to: number) =>
+    setGroups((prev) => {
+      const items = prev[gi].items;
+      if (from === to || to < 0 || to >= items.length) return prev;
+      const ni = [...items];
+      const [it] = ni.splice(from, 1);
+      ni.splice(to, 0, it);
+      return prev.map((g, idx) => (idx === gi ? { ...g, items: ni } : g));
+    });
 
-  const moveGroup = (i: number, dir: -1 | 1) => {
-    const j = i + dir;
-    if (j < 0 || j >= groups.length) return;
-    const next = [...groups];
-    [next[i], next[j]] = [next[j], next[i]];
-    commit(next);
-  };
-
-  const moveItem = (gi: number, ii: number, dir: -1 | 1) => {
-    const items = groups[gi].items;
-    const j = ii + dir;
-    if (j < 0 || j >= items.length) return;
-    const ni = [...items];
-    [ni[ii], ni[j]] = [ni[j], ni[ii]];
-    commit(groups.map((g, idx) => (idx === gi ? { ...g, items: ni } : g)));
+  const onDragEnd = () => {
+    dragRef.current = null;
+    setDragKey(null);
+    saveNavOrder(groupsRef.current);
   };
 
   const reset = () => {
@@ -58,34 +66,75 @@ export default function NavEditorPage() {
           </button>
         </div>
         <p className="text-muted mt-1 text-sm">
-          ▲▼ 버튼으로 그룹과 메뉴 항목의 순서를 바꾸세요. 변경 즉시 좌측 사이드바에 반영됩니다.
+          ⠿ 핸들을 드래그해 그룹·메뉴 순서를 바꾸세요. 변경 즉시 좌측 사이드바에 반영됩니다.
         </p>
 
         <div className="mt-4 space-y-3">
           {groups.map((g, gi) => (
-            <section key={g.id} className="card-3d bg-surface overflow-hidden rounded-xl">
-              {/* 그룹 헤더 */}
-              <div className="panel-head border-line flex items-center gap-2 border-b px-3 py-2">
+            <section
+              key={g.id}
+              onDragOver={(e) => {
+                if (dragRef.current?.type !== "group") return;
+                e.preventDefault();
+                if (dragRef.current.gi !== gi) {
+                  moveGroup(dragRef.current.gi, gi);
+                  dragRef.current = { type: "group", gi };
+                }
+              }}
+              className={`card-3d bg-surface overflow-hidden rounded-xl transition-opacity ${
+                dragKey === `g${gi}` ? "opacity-50" : ""
+              }`}
+            >
+              {/* 그룹 헤더 (드래그 핸들) */}
+              <div
+                draggable
+                onDragStart={() => {
+                  dragRef.current = { type: "group", gi };
+                  setDragKey(`g${gi}`);
+                }}
+                onDragEnd={onDragEnd}
+                className="panel-head flex cursor-grab items-center gap-2 px-3 py-2.5 active:cursor-grabbing"
+              >
+                <span className="text-muted text-sm select-none">⠿</span>
                 <span className="text-base">{g.icon}</span>
                 <span className="text-sm font-bold text-fg">{g.label}</span>
-                <span className="text-muted text-[11px]">· {g.items.length}개 메뉴</span>
-                <div className="ml-auto flex items-center gap-1">
-                  <ArrowBtn dir="up" disabled={gi === 0} onClick={() => moveGroup(gi, -1)} title="그룹 위로" />
-                  <ArrowBtn dir="down" disabled={gi === groups.length - 1} onClick={() => moveGroup(gi, 1)} title="그룹 아래로" />
-                </div>
+                <span className="text-muted ml-1 rounded-full bg-zinc-500/15 px-2 py-0.5 text-[10px]">
+                  {g.items.length}
+                </span>
               </div>
+              {/* 헤더 구분선 (그라데이션) */}
+              <div className="h-px w-full bg-gradient-to-r from-transparent via-sky-400/40 to-transparent" />
+
               {/* 항목 목록 */}
-              <ul className="divide-line divide-y">
+              <ul className="p-1.5">
                 {g.items.map((it, ii) => (
-                  <li key={it.href} className="flex items-center gap-2 px-3 py-2 text-sm">
-                    <span className="font-mono text-[12px] leading-none text-zinc-500">└</span>
+                  <li
+                    key={it.href}
+                    draggable
+                    onDragStart={(e) => {
+                      e.stopPropagation();
+                      dragRef.current = { type: "item", gi, ii };
+                      setDragKey(`i${gi}-${ii}`);
+                    }}
+                    onDragEnd={onDragEnd}
+                    onDragOver={(e) => {
+                      const d = dragRef.current;
+                      if (d?.type !== "item" || d.gi !== gi) return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (d.ii !== ii) {
+                        moveItem(gi, d.ii, ii);
+                        dragRef.current = { type: "item", gi, ii };
+                      }
+                    }}
+                    className={`group flex cursor-grab items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition active:cursor-grabbing hover:bg-zinc-500/10 ${
+                      dragKey === `i${gi}-${ii}` ? "opacity-40 ring-1 ring-sky-400/50" : ""
+                    }`}
+                  >
+                    <span className="text-muted/60 select-none transition group-hover:text-sky-400">⠿</span>
                     <span className="text-xs">{it.icon}</span>
                     <span className="text-fg">{it.label}</span>
-                    <span className="text-muted ml-2 truncate font-mono text-[10px]">{it.href}</span>
-                    <div className="ml-auto flex items-center gap-1">
-                      <ArrowBtn dir="up" disabled={ii === 0} onClick={() => moveItem(gi, ii, -1)} title="위로" />
-                      <ArrowBtn dir="down" disabled={ii === g.items.length - 1} onClick={() => moveItem(gi, ii, 1)} title="아래로" />
-                    </div>
+                    <span className="text-muted ml-auto truncate font-mono text-[10px]">{it.href}</span>
                   </li>
                 ))}
               </ul>
@@ -94,28 +143,5 @@ export default function NavEditorPage() {
         </div>
       </div>
     </Scroll>
-  );
-}
-
-function ArrowBtn({
-  dir,
-  disabled,
-  onClick,
-  title,
-}: {
-  dir: "up" | "down";
-  disabled?: boolean;
-  onClick: () => void;
-  title: string;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      className="rounded-md px-2 py-1 text-xs text-muted transition hover:bg-sky-500/15 hover:text-sky-400 disabled:opacity-25 disabled:hover:bg-transparent"
-    >
-      {dir === "up" ? "▲" : "▼"}
-    </button>
   );
 }

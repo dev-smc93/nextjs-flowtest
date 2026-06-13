@@ -22,8 +22,10 @@ const edgeHandle: React.CSSProperties = {
 function CollectorNode({ data, selected }: NodeProps) {
   const { collector } = data as CollectorNodeData;
   const meta = STATUS_META[collector.status];
-  const alarming = collector.status === "error" || collector.status === "offline";
   const isProc = collector.kind === "dbproc";
+  // 가상 = 미실행: 회색으로 통일
+  const badgeColor = collector.virtual ? "#94a3b8" : meta.color;
+  const alarming = collector.virtual || collector.status === "error" || collector.status === "offline";
 
   return (
     <div className="node-enter relative w-[230px]">
@@ -32,7 +34,7 @@ function CollectorNode({ data, selected }: NodeProps) {
         <div
           className="status-glow pointer-events-none absolute -inset-1.5 -z-10 rounded-2xl blur-md"
           style={{
-            backgroundColor: meta.color,
+            backgroundColor: badgeColor,
             animationDuration: collector.status === "error" ? "1.6s" : "2.8s",
           }}
         />
@@ -52,25 +54,29 @@ function CollectorNode({ data, selected }: NodeProps) {
 
         {/* 상태 배지 */}
         <div className="flex items-center justify-between gap-2">
-          <span
-            className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ${meta.textClass}`}
-            style={{ backgroundColor: `${meta.color}1f` }}
-          >
+          <span className="flex items-center gap-1">
             <span
-              className="inline-block h-2 w-2 rounded-full"
-              style={{
-                backgroundColor: meta.color,
-                boxShadow: `0 0 8px ${meta.color}`,
-              }}
-            />
-            {meta.label}
+              className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ${collector.virtual ? "text-zinc-300" : meta.textClass}`}
+              style={{ backgroundColor: `${badgeColor}1f` }}
+            >
+              <span
+                className="inline-block h-2 w-2 rounded-full"
+                style={{ backgroundColor: badgeColor, boxShadow: `0 0 8px ${badgeColor}` }}
+              />
+              {collector.virtual ? "미실행" : meta.label}
+            </span>
+            {collector.virtual && (
+              <span className="rounded-full bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-violet-300">
+                🧠 가상
+              </span>
+            )}
           </span>
           <span
             className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${
               isProc ? "bg-cyan-500/15 text-cyan-300" : "bg-violet-500/15 text-violet-300"
             }`}
           >
-            {isProc ? "🗄️ PROC" : collector.type}
+            {isProc ? `🗄️ ${collector.type}` : collector.type}
           </span>
         </div>
 

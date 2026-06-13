@@ -65,64 +65,67 @@ const VIEWS: { v: GraphView; label: string; icon: string }[] = [
 ];
 
 function GraphInner() {
-  const { collectors, resetNonce, focusId, focusNonce, focusCollector, mwOk, reset } = useCollectors();
+  const { collectors, resetNonce, focusId, focusNonce, focusCollector, mwOk, reset, graphView: view, setGraphView: setView } =
+    useCollectors();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [collapsedBands, setCollapsedBands] = useState<Set<string>>(new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [view, setView] = useState<GraphView>("all");
+  const [moving, setMoving] = useState(false); // 자동 이동 중에는 미니맵을 잠깐 끔
+  const [mmMounted, setMmMounted] = useState(true); // 미니맵 DOM 존재 여부
+  const [mmVisible, setMmVisible] = useState(true); // 미니맵 페이드(투명도) 제어
 
   const collectorsRef = useRef(collectors);
   collectorsRef.current = collectors;
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
 
-  const { fitView } = useReactFlow();
+  const { fitView, getViewport, setViewport, getInternalNode, setCenter } = useReactFlow();
+
+  // 필터 전환 시 '수집 미들웨어'를 화면 중앙으로 이동 (레이아웃 재구성 후)
+  const centerOnMiddleware = useCallback(() => {
+    setTimeout(() => {
+      try {
+        const mw = getInternalNode(MIDDLEWARE.id);
+        if (!mw) return;
+        const p = mw.internals?.positionAbsolute ?? mw.position;
+        const w = mw.measured?.width ?? 210;
+        const h = mw.measured?.height ?? 120;
+        setCenter(p.x + w / 2, p.y + h / 2, { zoom: getViewport().zoom, duration: 600 });
+      } catch {}
+    }, 140);
+  }, [getInternalNode, getViewport, setCenter]);
   const [nodes, setNodes, onNodesChangeRaw] = useNodesState<Node>(
     buildNodes(collectorsRef.current, new Set(), "all", new Set())
   );
-  const nodesRef = useRef(nodes);
-  nodesRef.current = nodes;
-  const animRef = useRef<number | null>(null);
-
   const onNodesChange = useCallback((changes: NodeChange<Node>[]) => onNodesChangeRaw(changes), [onNodesChangeRaw]);
 
-  // 펼침/필터 변경 시 위치 보간 (노드+선 함께 부드럽게)
+  // 펼침/필터 변경 시: 목표 레이아웃으로 한 번만 갱신.
+  // 위치 이동은 `.react-flow__node`의 CSS transform 트랜지션(GPU)으로 부드럽게 처리(프레임마다 setNodes 안 함 → 버벅임 제거).
   const mountedRef = useRef(false);
   useEffect(() => {
     if (!mountedRef.current) {
       mountedRef.current = true;
       return;
     }
-    if (animRef.current) cancelAnimationFrame(animRef.current);
-    const target = buildNodes(collectorsRef.current, expanded, view, collapsedBands);
-    const startPos = new Map(nodesRef.current.map((n) => [n.id, { ...n.position }]));
-    const targetPos = new Map(target.map((n) => [n.id, { ...n.position }]));
-    setNodes(target.map((n) => {
-      const s = startPos.get(n.id);
-      return s && !n.parentId ? { ...n, position: { ...s } } : n;
-    }));
-    const startT = performance.now();
-    const dur = 720; // 펼침/접힘 위치 보간 — 더 느긋하게
-    const step = (now: number) => {
-      const t = Math.min(1, (now - startT) / dur);
-      // ease-out-quint: 끝으로 갈수록 더 부드럽게 감속
-      const e = 1 - Math.pow(1 - t, 5);
-      setNodes((nds) =>
-        nds.map((n) => {
-          const s = startPos.get(n.id);
-          const tp = targetPos.get(n.id);
-          return s && tp && !n.parentId
-            ? { ...n, position: { x: s.x + (tp.x - s.x) * e, y: s.y + (tp.y - s.y) * e } }
-            : n;
-        })
-      );
-      if (t < 1) animRef.current = requestAnimationFrame(step);
-      else animRef.current = null;
-    };
-    animRef.current = requestAnimationFrame(step);
-    // 펼치기/접기 시 카메라는 그대로 둠 (자동 축소/맞춤 없음) — 위치 보간만 부드럽게
-    return () => {
-      if (animRef.current) cancelAnimationFrame(animRef.current);
-    };
-  }, [expanded, view, collapsedBands, setNodes, fitView]);
+    // 레이아웃 재구성 시에도 현재 선택 노드의 강조(selected)를 유지
+    setNodes(
+      buildNodes(collectorsRef.current, expanded, view, collapsedBands).map((n) =>
+        n.type === "collector" ? { ...n, selected: n.id === selectedIdRef.current } : n
+      )
+    );
+    // 펼치기/접기 시 카메라는 그대로 둠 (자동 축소/맞춤 없음)
+  }, [expanded, view, collapsedBands, setNodes]);
+
+  // 목록/노드에서 선택(selectedId) → 해당 수집기 노드 테두리 강조(node.selected)
+  useEffect(() => {
+    setNodes((nds) =>
+      nds.map((n) =>
+        n.type === "collector" && !!n.selected !== (n.id === selectedId)
+          ? { ...n, selected: n.id === selectedId }
+          : n
+      )
+    );
+  }, [selectedId, setNodes]);
 
   // 테이블 포커스 → 그룹 펼치고 이동
   const focusMounted = useRef(false);
@@ -135,25 +138,50 @@ function GraphInner() {
     const c = collectorsRef.current.find((x) => x.id === focusId);
     if (!c) return;
     const key = c.kind === "dbproc" ? `proc:${c.externalIp}` : c.externalIp;
-    setView("all");
+    // 현재 필터를 유지하되, 선택 수집기가 그 필터에서 안 보일 때만 해당 종류 뷰로 전환
+    const isProc = c.kind === "dbproc";
+    const visible = view === "all" || (isProc ? view === "dbproc" : view === "collector");
+    if (!visible) setView(isProc ? "dbproc" : "collector");
     setSelectedId(focusId);
-    // 카드가 보이도록 그룹 펼친 뒤, 펼침 보간(720ms)이 끝나면 해당 수집기로 확대(zoom in)
+    // 카드가 보이도록 그룹 펼침. 위치는 즉시 확정(시각 이동은 CSS) → 짧은 대기 후 바로 확대.
     setExpanded((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
+    // 자동 이동 동안엔 미니맵을 잠깐 언마운트 → 프레임마다 미니맵 리렌더 비용 제거(버벅임↓)
+    setMoving(true);
+    const DELAY = 350;
+    const DUR = 900;
     const t = setTimeout(() => {
       try {
-        fitView({ nodes: [{ id: focusId }], duration: 900, maxZoom: 1.5, padding: 3 });
+        // maxZoom을 낮춰 2단계 정도 덜 확대(더 뒤로)된 시야로 이동
+        fitView({ nodes: [{ id: focusId }], duration: DUR, maxZoom: 0.7, padding: 3 });
       } catch {}
-    }, 780);
-    return () => clearTimeout(t);
+    }, DELAY);
+    const tEnd = setTimeout(() => setMoving(false), DELAY + DUR + 120);
+    return () => {
+      clearTimeout(t);
+      clearTimeout(tEnd);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusNonce]);
+
+  // 미니맵 페이드 인/아웃: 이동 시작 → 페이드아웃 후 언마운트, 이동 종료 → 마운트 후 페이드인
+  useEffect(() => {
+    if (moving) {
+      setMmVisible(false); // 페이드 아웃
+      const t = setTimeout(() => setMmMounted(false), 260); // 페이드 끝나면 언마운트
+      return () => clearTimeout(t);
+    }
+    setMmMounted(true);
+    const t = setTimeout(() => setMmVisible(true), 20); // 마운트 후 페이드 인 트리거
+    return () => clearTimeout(t);
+  }, [moving]);
 
   // 최초 진입 시 통신 그래프 전체(모든 수집기)가 보이도록 축소(fit).
   // 그리드 레이아웃/노드 측정이 끝나는 시점이 가변적이라 여러 번 시도해 확실히 맞춤.
   useEffect(() => {
     const fit = () => {
       try {
-        fitView({ padding: 0.08, duration: 500, minZoom: 0.02 });
+        // 전체 맞춤하되 너무 작아지지 않도록 하한 유지(0.1)
+        fitView({ padding: 0.08, duration: 500, minZoom: 0.1 });
       } catch {}
     };
     const timers = [120, 450, 900].map((ms) => setTimeout(fit, ms));
@@ -243,21 +271,22 @@ function GraphInner() {
   }, [focusCollector]);
   const onPaneClick = useCallback(() => setSelectedId(null), []);
 
-  // 미니맵: 선택된 수집기의 통신 경로(수집기→그룹→대역→미들웨어)만 밝게, 나머지는 흐리게
+  // 선택 경로 노드 id 집합을 1번만 계산(미니맵 렌더마다 O(n) find 하던 것 → O(1) 조회로)
+  const pathIds = useMemo(() => {
+    if (!selectedId) return null;
+    const sel = collectors.find((c) => c.id === selectedId);
+    if (!sel) return null;
+    const grpKey = sel.kind === "dbproc" ? `proc:${sel.externalIp}` : sel.externalIp;
+    return new Set([selectedId, `grp-${grpKey}`, `band-${sel.kind}-${bandKey(sel.externalIp)}`]);
+  }, [selectedId, collectors]);
+
+  // 미니맵: 선택된 수집기의 통신 경로만 밝게, 나머지는 흐리게 (이동 중 비용 최소화)
   const minimapColor = useCallback(
     (n: Node) => {
-      if (!selectedId) return MINIMAP_NODE_COLOR(n);
-      const sel = collectorsRef.current.find((c) => c.id === selectedId);
-      if (!sel) return MINIMAP_NODE_COLOR(n);
-      const grpKey = sel.kind === "dbproc" ? `proc:${sel.externalIp}` : sel.externalIp;
-      const onPath =
-        n.id === selectedId ||
-        n.id === `grp-${grpKey}` ||
-        n.id === `band-${sel.kind}-${bandKey(sel.externalIp)}` ||
-        n.type === "middleware";
-      return onPath ? "#38bdf8" : "rgba(113,113,122,0.2)";
+      if (!pathIds) return MINIMAP_NODE_COLOR(n);
+      return pathIds.has(n.id) || n.type === "middleware" ? "#38bdf8" : "rgba(113,113,122,0.2)";
     },
-    [selectedId]
+    [pathIds]
   );
   // '전체 펼치기' 대상은 멤버 2개 이상 서버만 (단일 수집기는 박스가 없음)
   const groupKeys = useMemo(
@@ -266,6 +295,28 @@ function GraphInner() {
   );
   const selected = collectors.find((c) => c.id === selectedId) || null;
   const wrapRef = useRef<HTMLDivElement>(null);
+
+  // 휠 줌: 한 번에 약 2배(≈2칸) · 커서 기준 · 살짝 부드럽게 (RF 기본 휠 줌은 끔)
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const { x, y, zoom } = getViewport();
+      const factor = e.deltaY < 0 ? 1.45 : 1 / 1.45;
+      const next = Math.min(1.4, Math.max(0.1, zoom * factor));
+      if (next === zoom) return;
+      const rect = el.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      // 커서 아래 좌표를 고정한 채 줌
+      const fx = (px - x) / zoom;
+      const fy = (py - y) / zoom;
+      setViewport({ x: px - fx * next, y: py - fy * next, zoom: next }, { duration: 130 });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [getViewport, setViewport]);
 
   return (
     <div ref={wrapRef} className="relative h-full w-full">
@@ -279,8 +330,9 @@ function GraphInner() {
         onPaneClick={onPaneClick}
         fitView
         fitViewOptions={FIT_VIEW_OPTIONS}
-        minZoom={0.02}
-        maxZoom={1.8}
+        minZoom={0.1}
+        maxZoom={1.4}
+        zoomOnScroll={false}
         proOptions={PRO_OPTIONS}
         nodesConnectable={false}
         elementsSelectable
@@ -292,11 +344,17 @@ function GraphInner() {
         elevateEdgesOnSelect={false}
       >
         <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="var(--grid)" />
-        {/* 미니맵: 드래그(패닝)/줌 비활성화 */}
-        <MiniMap nodeColor={minimapColor} maskColor="rgba(9,9,11,0.6)" className="!bg-surface !border-line" />
+        {/* 미니맵: 자동 이동 중엔 언마운트(성능) + 사라짐/나타남 페이드 */}
+        {mmMounted && (
+          <MiniMap
+            nodeColor={minimapColor}
+            maskColor="rgba(9,9,11,0.6)"
+            className={`!bg-surface !border-line transition-opacity duration-300 ${mmVisible ? "opacity-100" : "opacity-0"}`}
+          />
+        )}
       </ReactFlow>
 
-      <MinimapPathOverlay selected={selected} containerRef={wrapRef} />
+      {mmMounted && mmVisible && <MinimapPathOverlay selected={selected} containerRef={wrapRef} />}
 
       {/* 필터 + 펼치기 + 초기화 */}
       <div className="pointer-events-none absolute left-3 top-3 flex flex-col gap-2">
@@ -304,7 +362,10 @@ function GraphInner() {
           {VIEWS.map(({ v, label, icon }) => (
             <button
               key={v}
-              onClick={() => setView(v)}
+              onClick={() => {
+                setView(v);
+                centerOnMiddleware();
+              }}
               className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${
                 view === v ? "bg-sky-500/20 text-sky-400" : "text-muted hover:bg-zinc-500/10"
               }`}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { DayPicker, type DateRange } from "react-day-picker";
 import { ko } from "date-fns/locale";
@@ -63,12 +63,20 @@ export function HistoryTopWidget() {
         <Scroll className="min-h-0 flex-1">
           <div className="space-y-2 p-4">
             {top.length === 0 && <div className="py-10 text-center text-xs text-emerald-400">금일 이상 없음 ✓</div>}
-            {top.map(({ c, error, offline }) => (
+            {top.map(({ c, error, offline, total }) => (
               <div key={c.id} className="flex items-center gap-2 text-xs">
                 <span className="w-40 shrink-0 truncate text-fg" title={c.name}>{c.name}</span>
-                <div className="flex h-3 flex-1 overflow-hidden rounded bg-surface2">
-                  <div className="h-full" style={{ width: `${(error / maxTotal) * 100}%`, background: ERR_C }} title={`오류 ${error}`} />
-                  <div className="h-full" style={{ width: `${(offline / maxTotal) * 100}%`, background: OFF_C }} title={`정지 ${offline}`} />
+                {/* 끝이 둥근 pill 형태 누적 막대 */}
+                <div className="relative h-3 flex-1 rounded-full bg-surface2">
+                  <div
+                    className="absolute inset-y-0 left-0 flex overflow-hidden rounded-full"
+                    style={{ width: `${(total / maxTotal) * 100}%` }}
+                  >
+                    {error > 0 && (
+                      <div className="h-full" style={{ width: `${(error / total) * 100}%`, background: ERR_C }} title={`오류 ${error}`} />
+                    )}
+                    {offline > 0 && <div className="h-full flex-1" style={{ background: OFF_C }} title={`정지 ${offline}`} />}
+                  </div>
                 </div>
                 <span className="w-16 shrink-0 text-right text-[11px] font-semibold tabular-nums">
                   <span className="text-red-400">{error}</span>
@@ -86,13 +94,27 @@ export function HistoryTopWidget() {
 
 // 위젯 2: 달력(기간) + 에러/정지 타임라인
 export function HistoryTimelineWidget() {
-  const { errorEvents } = useCollectors();
+  const { errorEvents, collectors } = useCollectors();
   const [range, setRange] = useState<DateRange | undefined>(() => ({
     from: new Date(Date.now() - 30 * 86400_000),
     to: new Date(),
   }));
   const [calOpen, setCalOpen] = useState(false);
+  const [sel, setSel] = useState<string>("all"); // 단일 필터: 이력 있는 작업명
   const calRef = useRef<HTMLDivElement>(null);
+
+  // 에러/정지 이력이 있는 작업명만, 프로젝트별로 그룹화 (콤보박스 옵션)
+  const histNames = useMemo(() => new Set(errorEvents.map((e) => e.name)), [errorEvents]);
+  const grouped = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    for (const c of collectors) {
+      if (!histNames.has(c.name)) continue;
+      (m.get(c.project) ?? m.set(c.project, new Set()).get(c.project)!).add(c.name);
+    }
+    return [...m.entries()]
+      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+      .map(([proj, names]) => ({ proj, names: [...names].sort() }));
+  }, [collectors, histNames]);
 
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
@@ -105,8 +127,8 @@ export function HistoryTimelineWidget() {
   const ranged = useMemo(() => {
     const f = range?.from ? new Date(range.from).setHours(0, 0, 0, 0) : -Infinity;
     const t = range?.to ?? range?.from ? new Date(range?.to ?? range!.from!).setHours(23, 59, 59, 999) : Infinity;
-    return errorEvents.filter((e) => e.ts >= f && e.ts <= t);
-  }, [errorEvents, range]);
+    return errorEvents.filter((e) => e.ts >= f && e.ts <= t && (sel === "all" || e.name === sel));
+  }, [errorEvents, range, sel]);
 
   const copyLog = (e: (typeof errorEvents)[number]) => {
     navigator.clipboard
@@ -121,7 +143,24 @@ export function HistoryTimelineWidget() {
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-2 text-sm font-bold text-fg">
           에러 / 정지(끊김) 타임라인
           <span className="text-muted ml-2 text-[11px] font-normal">{ranged.length}건</span>
-          <div ref={calRef} className="relative ml-auto text-[11px] font-normal">
+          {/* 이력 있는 작업만, 프로젝트별 그룹 — 단일 콤보박스 */}
+          <select
+            value={sel}
+            onChange={(e) => setSel(e.target.value)}
+            className="border-line bg-surface2 text-fg ml-auto max-w-[220px] rounded-lg border px-2 py-1.5 text-[11px] font-normal outline-none focus:border-sky-500"
+          >
+            <option value="all">전체 (이력 있는 작업)</option>
+            {grouped.map((g) => (
+              <optgroup key={g.proj} label={g.proj}>
+                {g.names.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          <div ref={calRef} className="relative text-[11px] font-normal">
             <button
               onClick={() => setCalOpen((v) => !v)}
               className="btn-3d border-line bg-surface2 text-fg flex items-center gap-1.5 rounded-lg border px-3 py-1.5"
@@ -130,7 +169,16 @@ export function HistoryTimelineWidget() {
             </button>
             {calOpen && (
               <div className="card-3d bg-surface page-enter absolute right-0 top-full z-30 mt-1 rounded-xl p-2">
-                <DayPicker mode="range" locale={ko} selected={range} onSelect={setRange} numberOfMonths={2} defaultMonth={range?.from} />
+                <DayPicker
+                  mode="range"
+                  locale={ko}
+                  selected={range}
+                  onSelect={setRange}
+                  numberOfMonths={2}
+                  defaultMonth={range?.from}
+                  max={31}
+                  disabled={{ after: new Date() }}
+                />
                 <div className="flex justify-end gap-2 px-2 pb-1">
                   <button
                     onClick={() => setRange({ from: new Date(Date.now() - 30 * 86400_000), to: new Date() })}
@@ -145,41 +193,79 @@ export function HistoryTimelineWidget() {
           </div>
         </div>
         <Scroll className="min-h-0 flex-1">
-          <ul className="divide-y divide-zinc-500/20">
-            {ranged.length === 0 && <li className="py-10 text-center text-xs text-muted">해당 기간 내 이벤트가 없습니다.</li>}
-            {ranged.map((e) => {
-              const meta = STATUS_META[e.status];
-              return (
-                <li key={e.id} className="group px-4 py-2 text-xs">
-                  <div className="flex items-center gap-3">
-                    <span className="font-mono text-[10px] text-muted">{fmtTime(e.ts)}</span>
-                    <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold" style={{ backgroundColor: `${meta.color}1f`, color: meta.color }}>
-                      {meta.label}
-                    </span>
-                    <span className="flex-1 truncate text-fg">{e.name}</span>
-                    <span className="truncate text-[10px] text-muted">{e.message}</span>
-                    <button
-                      onClick={() => copyLog(e)}
-                      title="로그 복사"
-                      className="text-muted shrink-0 rounded px-1.5 py-0.5 text-[10px] opacity-0 transition hover:bg-zinc-500/15 hover:text-sky-400 group-hover:opacity-100"
-                    >
-                      📋 복사
-                    </button>
-                  </div>
-                  <div
-                    className="mt-1.5 flex items-start gap-2 overflow-hidden rounded-md border-l-2 bg-black/40 px-2.5 py-1.5 font-mono text-[10px] shadow-inner"
-                    style={{ borderColor: meta.color }}
-                  >
-                    <span className="shrink-0 select-none text-emerald-400">❯</span>
-                    <span className="break-all text-zinc-300">{e.log}</span>
-                    <span className="ml-auto shrink-0 select-none rounded bg-white/5 px-1 text-[8px] uppercase tracking-wider" style={{ color: meta.color }}>
-                      log
-                    </span>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+          {ranged.length === 0 ? (
+            <div className="py-10 text-center text-xs text-muted">해당 기간 내 이벤트가 없습니다.</div>
+          ) : (
+            <div className="relative py-3 pl-8 pr-4">
+              {/* 세로 타임라인 레일 */}
+              <div className="absolute bottom-3 left-[16px] top-3 w-px bg-zinc-500/20" />
+              <ul className="space-y-2.5">
+                {ranged.map((e, i) => {
+                  const meta = STATUS_META[e.status];
+                  const prev = ranged[i - 1];
+                  const newDay = !prev || new Date(prev.ts).toDateString() !== new Date(e.ts).toDateString();
+                  return (
+                    <Fragment key={e.id}>
+                      {/* 날짜 구분 */}
+                      {newDay && (
+                        <li className="relative -ml-3 pt-1.5 pb-0.5">
+                          <span className="bg-surface2 text-muted rounded-full px-2 py-0.5 text-[10px] font-semibold">
+                            {fmtDay(new Date(e.ts))}
+                          </span>
+                        </li>
+                      )}
+                      <li className="group relative">
+                        {/* 상태 점 마커 */}
+                        <span
+                          className={`absolute -left-[22px] top-2 h-3 w-3 rounded-full border-2 border-surface ${
+                            e.status === "offline" ? "" : "status-glow"
+                          }`}
+                          style={{ backgroundColor: meta.color, boxShadow: `0 0 6px ${meta.color}` }}
+                        />
+                        {/* 이벤트 카드 */}
+                        <div className="border-line bg-surface2/40 rounded-lg border p-2.5 text-xs transition hover:bg-surface2/70">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="rounded px-1.5 py-0.5 text-[10px] font-semibold"
+                              style={{ backgroundColor: `${meta.color}1f`, color: meta.color }}
+                            >
+                              {meta.label}
+                            </span>
+                            <span className="truncate font-semibold text-fg">{e.name}</span>
+                            <span className="font-mono text-[10px] text-muted">{fmtTime(e.ts)}</span>
+                            <button
+                              onClick={() => copyLog(e)}
+                              title="로그 복사"
+                              className="text-muted ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] opacity-0 transition hover:bg-zinc-500/15 hover:text-sky-400 group-hover:opacity-100"
+                            >
+                              📋 복사
+                            </button>
+                          </div>
+                          <div className="mt-0.5 truncate text-[10px] text-muted">{e.message}</div>
+                          {/* 중지(끊김)는 로그가 없으므로 오류일 때만 로그 박스 표시 */}
+                          {e.status !== "offline" && (
+                            <div
+                              className="mt-1.5 flex items-start gap-2 overflow-hidden rounded-md border-l-2 bg-black/40 px-2.5 py-1.5 font-mono text-[10px] shadow-inner"
+                              style={{ borderColor: meta.color }}
+                            >
+                              <span className="shrink-0 select-none text-emerald-400">❯</span>
+                              <span className="break-all text-zinc-300">{e.log}</span>
+                              <span
+                                className="ml-auto shrink-0 select-none rounded bg-white/5 px-1 text-[8px] uppercase tracking-wider"
+                                style={{ color: meta.color }}
+                              >
+                                log
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </li>
+                    </Fragment>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
         </Scroll>
       </section>
     </div>

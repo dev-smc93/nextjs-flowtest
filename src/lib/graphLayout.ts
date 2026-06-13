@@ -208,17 +208,15 @@ function emitSet(nodes: Node[], kind: Collector["kind"], packing: Packing, origi
     const by = top + zp.pos[bi].y;
     const bandId = `band-${kind}-${bl.band}`;
     const members = bl.servers.flatMap((g) => g.members);
-    const isVirtual = members[0]?.virtual === true;
     nodes.push({
       id: bandId,
       type: "zone",
       position: { x: bx, y: by },
       data: {
-        label: isVirtual
-          ? `🧠 가상 · ${bl.band}`
-          : `${kind === "dbproc" ? "🗄️" : "🌐"} ${bl.band}`,
+        // 가상(미실행)도 실제 IP 대역으로 표시 — "가상 서버 대역"으로 따로 묶지 않음
+        label: `${kind === "dbproc" ? "🗄️" : "🌐"} ${bl.band}`,
         count: members.length,
-        accent: isVirtual ? "#a78bfa" : kind === "dbproc" ? "#22d3ee" : "#71717a",
+        accent: kind === "dbproc" ? "#22d3ee" : "#71717a",
         collapsed: bl.collapsed,
         worst: worstStatus(members),
       } satisfies ZoneNodeData,
@@ -284,11 +282,12 @@ export function buildNodes(
 function edgeProps(status: CollectorStatus) {
   switch (status) {
     case "normal":
-      return { animated: true, dash: undefined, opacity: 0.85 };
+      // 정상선: 초록 점선(정적) → 많아도 정돈되게, 문제 선만 더 도드라짐
+      return { animated: false, dash: "2 5", opacity: 0.6 };
     case "error":
       return { animated: true, dash: "2 4", opacity: 0.95 };
     case "offline":
-      return { animated: false, dash: "4 6", opacity: 0.4 };
+      return { animated: false, dash: "4 6", opacity: 0.45 };
   }
 }
 
@@ -327,11 +326,11 @@ export function buildEdges(
         type: "floating",
         animated: p.animated,
         style: {
-          // 가상 수집기는 보라색 점선으로 구분
-          stroke: isVirtual ? "#a78bfa" : STATUS_META[status].color,
-          strokeWidth: 2.5,
+          // 가상(미실행)은 회색 점선으로 구분. 정상은 옅은 초록 점선, 이상은 도드라지게.
+          stroke: isVirtual ? "#94a3b8" : STATUS_META[status].color,
+          strokeWidth: status === "normal" ? 1.6 : 2.5,
           strokeDasharray: isVirtual ? "2 5" : p.dash,
-          opacity: status === "offline" ? 0.5 : 0.9,
+          opacity: isVirtual ? 0.5 : p.opacity,
         },
       });
     }
@@ -378,14 +377,14 @@ export function buildEdges(
           ? {
               ...e,
               animated: true,
-              zIndex: 20,
+              zIndex: 20, // 강조선은 노드 앞으로
               style: {
                 ...e.style,
                 stroke: "#38bdf8",
-                strokeWidth: 4,
+                strokeWidth: 4.5,
                 strokeDasharray: "7 5",
                 opacity: 1,
-                filter: "drop-shadow(0 0 6px rgba(56,189,248,0.95))",
+                filter: "drop-shadow(0 0 5px rgba(56,189,248,0.9))", // 약간 빛나게
               },
             }
           : { ...e, animated: false, style: { ...e.style, opacity: 0.1 } }

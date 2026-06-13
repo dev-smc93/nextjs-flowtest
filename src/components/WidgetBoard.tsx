@@ -7,6 +7,7 @@ import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 
 import { useBoardChrome } from "@/lib/boardChrome";
+import { Modal } from "@/components/ui";
 import {
   WIDGET_MAP,
   BOARD_DEFAULTS,
@@ -105,6 +106,7 @@ export default function WidgetBoard({ boardId }: { boardId: BoardId }) {
   const [mounted, setMounted] = useState(false);
   const [active, setActive] = useState<string[]>(BOARD_DEFAULTS[boardId]);
   const [layout, setLayout] = useState<Layout[]>([]);
+  const [pendingRemove, setPendingRemove] = useState<string | null>(null); // 위젯 제거 확인
 
   const LK = `board-${boardId}-layout-v6`;
 
@@ -178,7 +180,7 @@ export default function WidgetBoard({ boardId }: { boardId: BoardId }) {
           const w = WIDGET_MAP[id];
           return (
             <div key={id}>
-              <Panel title={`${w.icon} ${w.title}`} editing={editing} index={i} onRemove={() => removeWidget(id)}>
+              <Panel title={`${w.icon} ${w.title}`} editing={editing} index={i} onRemove={() => setPendingRemove(id)}>
                 {w.render()}
               </Panel>
             </div>
@@ -191,6 +193,13 @@ export default function WidgetBoard({ boardId }: { boardId: BoardId }) {
   return (
     <div className="flex h-full flex-col">
       <div className="min-h-0 flex-1 overflow-auto">
+        {/* 마운트(레이아웃 로드) 전 로딩 스피너 → 잠깐 비는 화면 방지 */}
+        {!mounted && (
+          <div className="flex h-full w-full flex-col items-center justify-center gap-3">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-500/25 border-t-sky-400" />
+            <div className="text-muted text-xs">불러오는 중…</div>
+          </div>
+        )}
         {mounted && active.length === 0 && (
           <div className="text-muted flex h-full items-center justify-center text-sm">
             표시할 위젯이 없습니다 · ‘위젯 관리’에서 추가하세요
@@ -213,6 +222,34 @@ export default function WidgetBoard({ boardId }: { boardId: BoardId }) {
           </Grid>
         )}
       </div>
+
+      {/* 위젯 제거 확인 팝업 */}
+      {pendingRemove && (
+        <Modal title="위젯 제거" onClose={() => setPendingRemove(null)}>
+          <p className="text-muted text-xs leading-relaxed">
+            ‘{WIDGET_MAP[pendingRemove]?.title ?? pendingRemove}’ 위젯을 제거할까요?
+            <br />
+            ‘위젯 관리’에서 다시 추가할 수 있습니다.
+          </p>
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              onClick={() => setPendingRemove(null)}
+              className="text-muted rounded-lg bg-zinc-500/10 px-3 py-1.5 text-xs font-semibold ring-1 ring-zinc-500/30 hover:bg-zinc-500/20"
+            >
+              취소
+            </button>
+            <button
+              onClick={() => {
+                removeWidget(pendingRemove);
+                setPendingRemove(null);
+              }}
+              className="rounded-lg bg-red-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-red-400 active:scale-95"
+            >
+              제거
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

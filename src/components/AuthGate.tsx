@@ -36,24 +36,20 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="bg-app relative flex h-screen w-screen items-center justify-center overflow-hidden">
-      {/* 은은한 앰비언트 그라데이션 (애플풍) */}
-      <div className="pointer-events-none absolute -left-40 -top-40 h-96 w-96 rounded-full bg-sky-500/20 blur-[120px]" />
-      <div className="pointer-events-none absolute -bottom-40 -right-32 h-96 w-96 rounded-full bg-indigo-500/20 blur-[120px]" />
-      <div className="pointer-events-none absolute left-1/2 top-1/3 h-72 w-72 -translate-x-1/2 rounded-full bg-violet-500/10 blur-[120px]" />
-
+      {/* 은은한 배경 (단일 라디얼 글로우) */}
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{ background: "radial-gradient(55% 45% at 50% 32%, rgba(56,189,248,0.08), transparent 70%)" }}
+      />
       <form
         onSubmit={submit}
-        className={`page-enter relative w-[380px] rounded-[28px] border border-white/10 bg-surface/70 p-9 shadow-2xl backdrop-blur-2xl ${
+        className={`border-line bg-surface relative w-[360px] rounded-3xl border p-8 shadow-xl ${
           err ? "animate-[shake_0.3s]" : ""
         }`}
-        style={{ boxShadow: "0 20px 60px -15px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.08)" }}
       >
         {/* 앱 아이콘 (squircle + 신호 글리프) */}
-        <div
-          className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-[20px] bg-gradient-to-br from-sky-400 to-indigo-500 ring-1 ring-white/25"
-          style={{ boxShadow: "0 10px 24px -6px rgba(56,189,248,0.5), inset 0 1px 0 rgba(255,255,255,0.35)" }}
-        >
-          <svg viewBox="0 0 24 24" className="h-8 w-8" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-[18px] bg-gradient-to-br from-sky-400 to-indigo-500 ring-1 ring-white/20">
+          <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="15" r="1.5" fill="#fff" stroke="none" />
             <path d="M8.8 11.8a4.5 4.5 0 0 1 6.4 0" />
             <path d="M6.3 9a8 8 0 0 1 11.4 0" />
@@ -80,12 +76,10 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
         <button
           type="submit"
-          className="mt-5 w-full rounded-2xl bg-gradient-to-b from-sky-400 to-sky-500 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-sky-500/30 transition hover:from-sky-300 hover:to-sky-400 active:scale-[0.98]"
+          className="mt-5 w-full rounded-2xl bg-sky-500 px-4 py-3 text-sm font-semibold text-white transition hover:bg-sky-400 active:scale-[0.98]"
         >
           로그인
         </button>
-
-        <p className="text-muted mt-5 text-center text-[11px]">데모 비밀번호 · admin</p>
       </form>
     </div>
   );

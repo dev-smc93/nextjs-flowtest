@@ -119,10 +119,19 @@ type CollectorsCtx = {
   removeRecipient: (id: string) => void;
   sendLogs: SendLog[];
   sendTest: (kind: "alert" | "schedule") => { ok: boolean; msg: string };
-  // 대시보드 상태 카드 ↔ 목록 필터 연동
-  statusFilter: CollectorStatus | null;
-  setStatusFilter: (s: CollectorStatus | null) => void;
+  // 대시보드 상태 카드 ↔ 목록 필터 연동 ("inactive" = 미실행/가상)
+  statusFilter: StatusFilter | null;
+  setStatusFilter: (s: StatusFilter | null) => void;
+  // 통신 토폴로지 종류 필터 ↔ 수집기 목록 연동 (all/collector/dbproc)
+  graphView: GraphView;
+  setGraphView: (v: GraphView) => void;
 };
+
+// 통신 토폴로지 보기 필터 (전체 / 수집기→미들웨어 / 미들웨어→DB프로시저)
+export type GraphView = "all" | "collector" | "dbproc";
+
+// 상태 필터 ("inactive" = 미실행/가상)
+export type StatusFilter = CollectorStatus | "inactive";
 
 const Ctx = createContext<CollectorsCtx | null>(null);
 
@@ -142,7 +151,8 @@ export function CollectorsProvider({ children }: { children: ReactNode }) {
   const [mwTesting, setMwTesting] = useState(false);
   const [recipients, setRecipients] = useState<Recipient[]>(seedRecipients);
   const [sendLogs, setSendLogs] = useState<SendLog[]>(seedSendLogs);
-  const [statusFilter, setStatusFilter] = useState<CollectorStatus | null>(null);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter | null>(null);
+  const [graphView, setGraphView] = useState<GraphView>("all");
 
   const addRecipient = (r: Omit<Recipient, "id">) =>
     setRecipients((p) => [{ ...r, id: `rcp-${Date.now()}` }, ...p]);
@@ -285,6 +295,8 @@ export function CollectorsProvider({ children }: { children: ReactNode }) {
         sendTest,
         statusFilter,
         setStatusFilter,
+        graphView,
+        setGraphView,
       }}
     >
       {children}

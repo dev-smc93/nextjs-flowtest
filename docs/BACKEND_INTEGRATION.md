@@ -1,7 +1,8 @@
-# CollectOps 백엔드 연동 문서 (MSSQL)
+# CollectOps 데이터 연동 문서 (Next.js + MSSQL)
 
-> 대상: 백엔드 개발자
-> 목적: 현재 프론트엔드(Next.js)가 사용하는 **목(mock) 데이터를 실제 MSSQL 기반 API로 교체**하기 위한 데이터 모델·API 계약·상태 계산 규칙 정의
+> 대상: 본 프로젝트 개발자
+> 목적: 현재 사용 중인 **목(mock) 데이터를, Next.js Route Handler가 MSSQL에 직접 질의해 내려주는 실데이터로 교체**하기 위한 데이터 모델·엔드포인트 계약·상태 계산 규칙 정의
+> 구조: **별도 백엔드 서버 없음.** Next.js(풀스택)가 서버 전용 `mssql` 커넥션으로 MSSQL에 직접 붙어 React로 JSON을 내려줍니다.
 > 연동 DB: **Microsoft SQL Server (MSSQL)**
 
 ---
@@ -9,20 +10,22 @@
 ## 1. 전체 구조 한눈에 보기
 
 ```
-[수집기/DB프로시저]  --(heartbeat/실행로그)-->  [수집 미들웨어]  -->  [MSSQL]
-                                                                      |
-                                                            [백엔드 API (신규 개발)]
-                                                                      |  REST(JSON) / (옵션) SSE
-                                                                      v
-                                                          [CollectOps 프론트엔드(Next.js)]
+[수집기/DB프로시저] --(heartbeat/실행로그)--> [수집 미들웨어] --> [MSSQL]
+                                                                    ^
+                                                                    | mssql 커넥션 풀 (서버 전용, app/api 안에서만)
+                                                       [Next.js Route Handlers : app/api/*/route.ts]
+                                                                    | JSON (동일 프로세스)
+                                                                    v
+                                          [CollectOps React (클라이언트 Context, 2초 폴링)]
 ```
 
-- 프론트엔드는 **모든 데이터를 한 파일에서만** 가져옵니다: `src/lib/sampleData.ts`
-- 현재는 이 파일이 가짜 데이터를 만들어 냅니다. **백엔드 연동 = 이 파일의 함수들을 실제 API 호출로 바꾸는 것**이 전부이며, 화면 컴포넌트는 수정할 필요가 없습니다.
-- 따라서 백엔드는 **아래 6절의 REST 응답 JSON 형태를 그대로 맞춰주면** 됩니다. (프론트 타입과 1:1 매핑)
+- **별도 백엔드 서버를 만들지 않습니다.** Next.js가 곧 서버입니다 — `app/api/.../route.ts`(Route Handler) 안에서 `mssql` 드라이버로 MSSQL에 직접 질의하고 JSON을 반환합니다.
+- 클라이언트(React)는 **모든 데이터를 한 파일에서만** 가져옵니다: `src/lib/sampleData.ts`
+- 현재는 이 파일이 가짜 데이터를 만들어 냅니다. **연동 = 이 파일의 함수들을 내부 `/api/*` 호출(fetch)로 바꾸고, 해당 Route Handler에서 MSSQL을 질의하는 것**이 전부이며, 화면 컴포넌트는 수정할 필요가 없습니다.
+- DB 자격증명·커넥션 풀은 **서버 전용 모듈**(예: `src/server/db.ts`)에 두고 Route Handler에서만 import 합니다. (클라이언트 번들로 새어나가지 않게 — `"use client"` 파일에서 import 금지)
 
-### 프론트 교체 지점 (참고)
-| 현재 함수 (sampleData.ts) | 의미 | 대응 API |
+### 교체 지점 (참고)
+| 현재 함수 (sampleData.ts) | 의미 | 대응 Route Handler |
 |---|---|---|
 | `INITIAL_COLLECTORS`, `tickCollectors()` | 수집기 현재 상태(라이브) | `GET /api/collectors` (폴링) |
 | `seedErrorEvents()` | 에러/중지 이력 | `GET /api/events` |
@@ -33,6 +36,57 @@
 | `DEFAULT_ALERT` | 알림 정책 | `GET/PUT /api/alert-config` |
 | `mockSendResult()` | 알림 테스트 발송 결과 | `POST /api/alerts/test` |
 | `mockMiddlewareOk()` | 미들웨어 헬스 | `GET /api/middleware/health` |
+
+### 1.1 MSSQL 연결 (Next.js 서버 전용)
+
+`mssql`(tedious) 패키지로 커넥션 풀을 한 번 만들어 재사용합니다. **이 모듈은 Route Handler/Server Component에서만 import** 하세요.
+
+```ts
+// src/server/db.ts  ── 서버에서만 import (클라이언트 번들 금지)
+import "server-only";
+import sql from "mssql";
+
+const config: sql.config = {
+  server: process.env.MSSQL_HOST!,
+  port: Number(process.env.MSSQL_PORT ?? 1433),
+  database: process.env.MSSQL_DB!,
+  user: process.env.MSSQL_USER!,
+  password: process.env.MSSQL_PASSWORD!,
+  options: { encrypt: true, trustServerCertificate: true }, // 사내망 자가서명 시 true
+  pool: { max: 10, min: 0, idleTimeoutMillis: 30000 },
+};
+
+// 핫리로드/서버리스에서 풀 중복 생성 방지 (전역 캐시)
+const g = globalThis as unknown as { _mssqlPool?: Promise<sql.ConnectionPool> };
+export const getPool = () => (g._mssqlPool ??= new sql.ConnectionPool(config).connect());
+```
+
+```env
+# .env.local (서버 전용 — NEXT_PUBLIC_ 접두사 금지)
+MSSQL_HOST=10.0.0.50
+MSSQL_PORT=1433
+MSSQL_DB=collectops
+MSSQL_USER=collectops_app
+MSSQL_PASSWORD=********
+```
+
+예시 Route Handler — 4.1의 상태 계산 쿼리를 그대로 사용:
+
+```ts
+// src/app/api/collectors/route.ts
+import { NextResponse } from "next/server";
+import { getPool } from "@/server/db";
+
+export const dynamic = "force-dynamic"; // 매 요청 최신 상태
+
+export async function GET() {
+  const pool = await getPool();
+  const { recordset } = await pool.request().query(/* 4.1 SELECT ... */);
+  return NextResponse.json(recordset); // Collector[] 형태 그대로
+}
+```
+
+> Server Component에서 `getPool()`을 직접 호출해 초기 데이터를 렌더할 수도 있지만, 현재 화면은 클라이언트 Context가 2초 폴링하는 구조이므로 **Route Handler + fetch** 가 가장 적은 변경으로 연동됩니다.
 
 ---
 
@@ -272,16 +326,17 @@ WHERE c.IsRegistered = 1;
 
 프론트는 **2초 주기**로 수집기 상태를 갱신하도록 설계되어 있습니다. (대시보드 자동 갱신 바도 이 주기를 시각화)
 
-- **권장(단순): 폴링** — 프론트가 `GET /api/collectors`를 2~3초 간격으로 호출. 백엔드는 가벼운 단일 쿼리(4.1)로 응답.
-- **옵션(고급): SSE/WebSocket** — `GET /api/stream`(text/event-stream)으로 상태 변화 시 push. 대량(수백 대) 환경에서 트래픽 절감. 1차 연동은 폴링으로 시작 권장.
+- **권장(단순): 폴링** — 클라이언트가 `GET /api/collectors`를 2~3초 간격으로 호출. Route Handler는 가벼운 단일 쿼리(4.1)를 풀에서 실행해 응답.
+- **옵션(고급): SSE** — Route Handler(`GET /api/stream`)에서 `ReadableStream`으로 text/event-stream을 push. 대량(수백 대) 환경에서 트래픽 절감. 1차 연동은 폴링으로 시작 권장.
 
 > 신규 에러/중지 이벤트도 폴링으로 가져옵니다: `GET /api/events?since={마지막ts}` 로 증분 조회.
 
 ---
 
-## 6. REST API 명세
+## 6. 엔드포인트 명세 (Next.js Route Handlers)
 
-> 공통: 응답 `Content-Type: application/json; charset=utf-8`. 인증 헤더는 9절 참고.
+> 아래 경로는 모두 `src/app/api/.../route.ts` 로 구현하는 내부 엔드포인트입니다. (별도 백엔드 아님)
+> 공통: 응답 `Content-Type: application/json; charset=utf-8`. (사내망 내부용 — 별도 인증 헤더 없음)
 
 ### 6.1 수집기 라이브 상태
 ```
@@ -380,24 +435,17 @@ GET /api/middleware/health       -> { ok: boolean }
 
 ---
 
-## 9. 인증 / 보안
-
-- 현재 프론트는 **데모 비밀번호 `admin`**(클라이언트 sessionStorage)로만 막혀 있습니다 → 실제 연동 시 **서버 인증(JWT/세션)** 으로 교체 필요.
-- API는 사내망/리버스프록시 뒤에 두고, 토큰(`AlertConfig.token` 등 민감정보)은 응답에서 마스킹 권장.
-- CORS: 프론트 도메인만 허용.
-
----
-
-## 10. 연동 체크리스트
+## 9. 연동 체크리스트
 
 - [ ] 4절 스키마로 MSSQL 테이블 생성
 - [ ] 미들웨어 → `Collectors.LastSignalAt`/집계 컬럼 적재 파이프라인
-- [ ] 6절 REST 엔드포인트 구현 (JSON 형태 정확히 일치)
-- [ ] 상태/`lastSignalSec`는 **서버에서 계산**해 응답(2.1)
+- [ ] `mssql` 패키지 설치 + `src/server/db.ts` 커넥션 풀 + `.env.local` 자격증명(1.1)
+- [ ] 6절 엔드포인트를 `app/api/.../route.ts` Route Handler로 구현 (JSON 형태 정확히 일치)
+- [ ] 상태/`lastSignalSec`는 **Route Handler(SQL)에서 계산**해 응답(2.1, 4.1)
 - [ ] 시간은 **epoch ms**로 직렬화
-- [ ] 프론트 `src/lib/sampleData.ts`의 시드/시뮬레이션 함수를 `fetch` 호출로 교체 (1절 매핑표)
+- [ ] 클라이언트 `src/lib/sampleData.ts`의 시드/시뮬레이션 함수를 내부 `/api/*` `fetch` 호출로 교체 (1절 매핑표)
+- [ ] DB 모듈은 서버 전용(`import "server-only"`) — `"use client"` 파일에서 import 금지
 - [ ] 폴링 주기(기본 2초) 확정, 필요 시 SSE 전환
-- [ ] 인증/CORS/민감정보 마스킹 적용
 
 ---
 
@@ -406,11 +454,11 @@ GET /api/middleware/health       -> { ok: boolean }
 // 변경 전 (sampleData.ts): 가짜 데이터 생성
 export const INITIAL_COLLECTORS = [ /* ... */ ];
 
-// 변경 후 (예시): 실제 API 호출 어댑터
+// 변경 후 (예시): 내부 /api 호출 어댑터 — 해당 Route Handler가 MSSQL을 질의
 export async function fetchCollectors(): Promise<Collector[]> {
   const res = await fetch("/api/collectors", { cache: "no-store" });
   if (!res.ok) throw new Error("collectors fetch failed");
   return res.json(); // Collector[] 형태 그대로
 }
 ```
-> Context(`collectorsContext.tsx`)의 2초 `setInterval`(현재 `tickCollectors` 호출)을 `fetchCollectors()` 폴링으로 바꾸면 됩니다. 화면 컴포넌트는 무수정.
+> Context(`collectorsContext.tsx`)의 2초 `setInterval`(현재 `tickCollectors` 호출)을 `fetchCollectors()` 폴링으로 바꾸면 됩니다. 화면 컴포넌트는 무수정. (`/api/collectors` Route Handler 구현은 1.1 참고)

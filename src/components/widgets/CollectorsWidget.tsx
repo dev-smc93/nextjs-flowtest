@@ -74,7 +74,13 @@ export default function CollectorsPage() {
         </div>
       </div>
 
-      {adding && <AddForm onAdd={handleAdd} onClose={() => setAdding(false)} />}
+      {adding && (
+        <AddForm
+          onAdd={handleAdd}
+          onClose={() => setAdding(false)}
+          existingIps={registry.map((r) => r.ip)}
+        />
+      )}
 
       <div className="grid min-h-0 flex-1 grid-rows-[1.6fr_1fr] gap-3">
         {/* 등록된 수집기 */}
@@ -185,47 +191,120 @@ function RegRow({
   );
 }
 
+const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+
 function AddForm({
   onAdd,
   onClose,
+  existingIps,
 }: {
   onAdd: (e: Omit<RegistryEntry, "id">) => void;
   onClose: () => void;
+  existingIps: string[];
 }) {
   const [f, setF] = useState({ name: "", ip: "", project: "" });
+  const [touched, setTouched] = useState(false);
+
+  const name = f.name.trim();
+  const ip = f.ip.trim();
+  const project = f.project.trim();
+  const errors = {
+    name: !name ? "명칭을 입력하세요" : "",
+    ip: !ip
+      ? "IP를 입력하세요"
+      : !IPV4.test(ip)
+        ? "올바른 IPv4 형식이 아닙니다 (예: 10.0.1.20)"
+        : existingIps.includes(ip)
+          ? "이미 등록된 IP입니다"
+          : "",
+    project: !project ? "작업명을 입력하세요" : "",
+  };
+  const valid = !errors.name && !errors.ip && !errors.project;
+
+  const submit = () => {
+    setTouched(true);
+    if (!valid) return;
+    onAdd({ name, ip, project });
+    onClose();
+  };
+
   return (
-    <div className="bg-surface border-line fade-in flex flex-wrap items-end gap-2 rounded-xl border p-3">
-      <L label="명칭">
-        <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} className="inp" />
-      </L>
-      <L label="IP">
-        <input value={f.ip} onChange={(e) => setF({ ...f, ip: e.target.value })} className="inp" />
-      </L>
-      <L label="작업명">
-        <input value={f.project} onChange={(e) => setF({ ...f, project: e.target.value })} className="inp" />
-      </L>
-      <button
-        onClick={() => {
-          if (!f.name || !f.ip) return;
-          onAdd(f);
-          onClose();
-        }}
-        className="rounded-lg bg-emerald-500/20 px-3 py-2 text-xs font-semibold text-emerald-300 ring-1 ring-emerald-500/40 transition hover:bg-emerald-500/30"
-      >
-        등록
-      </button>
-      <button onClick={onClose} className="text-muted px-2 py-2 text-xs hover:text-zinc-300">
-        취소
-      </button>
+    <div className="bg-surface border-line fade-in rounded-xl border p-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <Field
+          label="명칭"
+          value={f.name}
+          onChange={(v) => setF({ ...f, name: v })}
+          onEnter={submit}
+          placeholder="예: 강남 수집서버"
+          error={touched ? errors.name : ""}
+        />
+        <Field
+          label="IP"
+          value={f.ip}
+          onChange={(v) => setF({ ...f, ip: v })}
+          onEnter={submit}
+          placeholder="예: 10.0.1.20"
+          mono
+          error={touched ? errors.ip : ""}
+        />
+        <Field
+          label="작업명"
+          value={f.project}
+          onChange={(v) => setF({ ...f, project: v })}
+          onEnter={submit}
+          placeholder="예: market_ingest"
+          error={touched ? errors.project : ""}
+        />
+      </div>
+      <div className="border-line mt-3 flex items-center justify-end gap-2 border-t pt-3">
+        <button onClick={onClose} className="text-muted rounded-lg px-3 py-1.5 text-xs font-semibold hover:text-zinc-300">
+          취소
+        </button>
+        <button
+          onClick={submit}
+          disabled={touched && !valid}
+          className="rounded-lg bg-emerald-500/20 px-4 py-1.5 text-xs font-semibold text-emerald-300 ring-1 ring-emerald-500/40 transition hover:bg-emerald-500/30 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          등록
+        </button>
+      </div>
     </div>
   );
 }
 
-function L({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  value,
+  onChange,
+  onEnter,
+  placeholder,
+  error,
+  mono,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  onEnter: () => void;
+  placeholder?: string;
+  error?: string;
+  mono?: boolean;
+}) {
   return (
     <label className="flex flex-col gap-1">
-      <span className="text-muted text-[10px]">{label}</span>
-      <span className="w-36">{children}</span>
+      <span className="text-muted text-[11px] font-medium">{label}</span>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && onEnter()}
+        placeholder={placeholder}
+        className={`w-full rounded-md border bg-surface2 px-2.5 py-1.5 text-xs text-fg outline-none transition placeholder:text-zinc-600 ${
+          mono ? "font-mono" : ""
+        } ${error ? "border-red-500/70 focus:border-red-500" : "border-line focus:border-sky-500"}`}
+      />
+      <span className={`text-[10px] leading-tight text-red-400 transition-opacity ${error ? "opacity-100" : "opacity-0"}`}>
+        {error || " "}
+      </span>
     </label>
   );
 }

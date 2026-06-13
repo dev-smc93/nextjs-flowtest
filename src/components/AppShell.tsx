@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ClipLoader } from "react-spinners";
 import { useCollectors } from "@/lib/collectorsContext";
+import { cronNext, daysUntil } from "@/lib/cron";
 import { useTheme } from "@/lib/theme";
 import { BoardChromeProvider, useBoardChrome } from "@/lib/boardChrome";
 import { DEFAULT_NAV_GROUPS, loadNavGroups, NAV_ORDER_EVENT, type NavGroup } from "@/lib/nav";
@@ -33,8 +34,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
 function AppShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { injectFault, injectOffline, mwOk, mwTesting, testMiddleware } = useCollectors();
+  const { injectFault, injectOffline, mwOk, mwTesting, testMiddleware, errorEvents, collectors, configs, mutedIds } =
+    useCollectors();
   const { theme, toggle } = useTheme();
+  // 현재 페이지에 없을 때 이벤트가 발생한 메뉴를 깜빡이게 한다
+  const [blink, setBlink] = useState<Set<string>>(new Set());
   const { editing, toggleEditing, boardActive, resetCurrent } = useBoardChrome();
   const [now, setNow] = useState("");
   const [collapsed, setCollapsed] = useState(true);
@@ -54,18 +58,14 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const v = localStorage.getItem("nav-collapsed");
     if (v !== null) setCollapsed(v === "1");
-    const fmt = () =>
-      new Date().toLocaleString("ko-KR", {
-        year: "2-digit",
-        month: "2-digit",
-        day: "2-digit",
-        weekday: "short",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      });
+    const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
+    const p2 = (n: number) => String(n).padStart(2, "0");
+    const fmt = () => {
+      const d = new Date();
+      return `${p2(d.getMonth() + 1)}.${p2(d.getDate())} (${DAYS[d.getDay()]}) ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
+    };
     setNow(fmt());
-    // 시간은 자동 갱신 바(10초)가 한 바퀴 돌 때마다 갱신
+    // 자동 갱신 바(10초)가 한 바퀴 돌 때마다 시간 갱신 (바와 동일 주기·동일 시작)
     const t = setInterval(() => setNow(fmt()), 10000);
     return () => clearInterval(t);
   }, []);
@@ -98,6 +98,56 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
     }
     wasTesting.current = mwTesting;
   }, [mwTesting, mwOk]);
+
+  // 점검 알림 임박 건수 (점검 일정 이벤트 판정용)
+  const dueCount = useMemo(
+    () =>
+      collectors.filter((c) => {
+        if (mutedIds.has(c.id)) return false;
+        const cfg = configs[c.id];
+        if (!cfg) return false;
+        const d = daysUntil(cronNext(cfg.cron));
+        return d !== null && d <= cfg.remindDays;
+      }).length,
+    [collectors, configs, mutedIds]
+  );
+
+  // 대시보드: 새 에러·정지 이벤트 → 다른 페이지면 '대시보드' 메뉴 깜빡임
+  const lastEventId = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    const top = errorEvents[0]?.id ?? null;
+    if (lastEventId.current === undefined) {
+      lastEventId.current = top; // 최초(시드) 기준선 — 깜빡이지 않음
+      return;
+    }
+    if (top && top !== lastEventId.current) {
+      lastEventId.current = top;
+      if (pathname !== "/monitor") setBlink((p) => new Set(p).add("/monitor"));
+    }
+  }, [errorEvents, pathname]);
+
+  // 점검 일정: 임박 건수 증가 → 다른 페이지면 '점검 일정' 메뉴 깜빡임
+  const prevDue = useRef<number | null>(null);
+  useEffect(() => {
+    if (prevDue.current === null) {
+      prevDue.current = dueCount;
+      return;
+    }
+    if (dueCount > prevDue.current && pathname !== "/monitor/schedule") {
+      setBlink((p) => new Set(p).add("/monitor/schedule"));
+    }
+    prevDue.current = dueCount;
+  }, [dueCount, pathname]);
+
+  // 해당 페이지로 진입하면 그 메뉴의 깜빡임 해제
+  useEffect(() => {
+    setBlink((p) => {
+      if (!p.has(pathname)) return p;
+      const n = new Set(p);
+      n.delete(pathname);
+      return n;
+    });
+  }, [pathname]);
 
   return (
     <div className="bg-app text-fg flex h-screen w-screen overflow-hidden">
@@ -136,8 +186,19 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
               자동 갱신
             </span>
             {!collapsed && (
-              <div className="bg-surface2 h-1.5 w-20 overflow-hidden rounded-full">
-                <div className="h-full rounded-full bg-sky-500" style={{ animation: "refillBar 10s linear infinite" }} />
+              <div
+                className="bg-surface2 relative h-2 w-20 overflow-hidden rounded-full"
+                style={{ boxShadow: "inset 0 1px 2px rgba(0,0,0,0.45)" }}
+              >
+                <div
+                  className="h-full w-full rounded-full"
+                  style={{
+                    transformOrigin: "left",
+                    animation: "refillBar 10s linear infinite",
+                    background: "linear-gradient(180deg, #7dd3fc 0%, #38bdf8 55%, #0284c7 100%)",
+                    boxShadow: "0 0 6px rgba(56,189,248,0.65), inset 0 1px 0 rgba(255,255,255,0.55)",
+                  }}
+                />
               </div>
             )}
           </div>
@@ -170,15 +231,16 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
                     <div className={`mt-0.5 space-y-0.5 pb-1 ${collapsed ? "pl-0.5" : "pl-3"}`}>
                       {g.items.map((n) => {
                         const active = pathname === n.href;
+                        const blinking = blink.has(n.href);
                         return (
                           <Link
                             key={n.href}
                             href={n.href}
                             title={n.label}
-                            className={`flex items-center gap-1.5 overflow-hidden rounded-lg px-2 py-2 text-sm font-medium whitespace-nowrap transition ${
+                            className={`relative flex items-center gap-1.5 overflow-hidden rounded-lg px-2 py-2 text-sm font-medium whitespace-nowrap transition ${
                               active
                                 ? "nav-active bg-sky-500/15 text-sky-400 ring-1 ring-sky-500/30"
-                                : "text-muted hover:bg-zinc-500/10"
+                                : `text-muted hover:bg-zinc-500/10 ${blinking ? "nav-blink text-sky-300 ring-1 ring-sky-400/40" : ""}`
                             }`}
                           >
                             <span className="shrink-0 font-mono text-[12px] leading-none text-zinc-500">└</span>
@@ -221,7 +283,7 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="panel-head border-line flex shrink-0 items-center gap-3 border-b px-5 py-3">
           <h1 className="text-base font-extrabold">{TITLES[pathname] ?? "모니터"}</h1>
-          <span className="text-muted font-mono text-xs">{now}</span>
+          <span className="text-muted font-mono text-xs tabular-nums">{now}</span>
           {/* 미들웨어 헬스 */}
           <button
             onClick={testMiddleware}
@@ -239,9 +301,13 @@ function AppShellInner({ children }: { children: React.ReactNode }) {
                 <ClipLoader size={11} color="#38bdf8" /> 점검중…
               </span>
             ) : mwOk ? (
-              "🛰️ 미들웨어 정상"
+              <span className="inline-flex items-center gap-1.5">
+                <span className="icon-orbit">🛰️</span> 미들웨어 정상
+              </span>
             ) : (
-              "🛰️ 미들웨어 이상"
+              <span className="inline-flex items-center gap-1.5">
+                <span className="icon-orbit">🛰️</span> 미들웨어 이상
+              </span>
             )}
           </button>
           <div className="ml-auto flex items-center gap-2">

@@ -27,13 +27,15 @@ export function RecipientsPanel() {
       <div className="space-y-1.5">
         {recipients.map((r) => (
           <div key={r.id} className="bg-surface2 flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs">
-            <button
-              onClick={() => {
+            <input
+              type="checkbox"
+              checked={r.enabled}
+              onChange={() => {
                 updateRecipient(r.id, { enabled: !r.enabled });
                 toast(r.enabled ? `🔕 발송 OFF · ${r.name}` : `🔔 발송 ON · ${r.name}`);
               }}
               title="발송 ON/OFF"
-              className={`h-2.5 w-2.5 shrink-0 rounded-full transition ${r.enabled ? "bg-emerald-500" : "bg-zinc-500"}`}
+              className="h-3.5 w-3.5 shrink-0 cursor-pointer accent-emerald-500"
             />
             <div className="min-w-0 flex-1">
               <div className="text-fg truncate font-semibold">{r.name}</div>

@@ -24,7 +24,7 @@ function highlight(text: string, q: string) {
 }
 
 export default function TableWidget() {
-  const { collectors, errorEvents, mutedIds, toggleMute, focusCollector, statusFilter, setStatusFilter, focusId } =
+  const { collectors, errorEvents, mutedIds, toggleMute, focusCollector, statusFilter, setStatusFilter, focusId, graphView } =
     useCollectors();
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("status");
@@ -44,7 +44,12 @@ export default function TableWidget() {
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     let list = collectors;
-    if (statusFilter) list = list.filter((c) => c.status === statusFilter);
+    // 통신 토폴로지 종류 필터와 연동
+    if (graphView === "collector") list = list.filter((c) => c.kind === "collector");
+    else if (graphView === "dbproc") list = list.filter((c) => c.kind === "dbproc");
+    // 상태 필터: inactive=미실행(가상), 그 외 상태는 가상 제외
+    if (statusFilter === "inactive") list = list.filter((c) => c.virtual);
+    else if (statusFilter) list = list.filter((c) => c.status === statusFilter && !c.virtual);
     if (q) {
       list = list.filter(
         (c) =>
@@ -62,7 +67,7 @@ export default function TableWidget() {
       if (av > bv) return 1 * dir;
       return 0;
     });
-  }, [collectors, query, sortKey, asc, statusFilter]);
+  }, [collectors, query, sortKey, asc, statusFilter, graphView]);
 
   const toggleSort = (k: SortKey) => {
     if (k === sortKey) setAsc((v) => !v);
@@ -81,15 +86,22 @@ export default function TableWidget() {
           placeholder="작업 / 프로젝트 / IP 검색"
           className="min-w-0 flex-1 rounded-md border border-line bg-surface2 px-3 py-1.5 text-xs text-fg outline-none placeholder:text-muted focus:border-sky-500"
         />
-        {statusFilter && (
-          <button
-            onClick={() => setStatusFilter(null)}
-            className="shrink-0 rounded-full px-2 py-1 text-[11px] font-semibold"
-            style={{ backgroundColor: `${STATUS_META[statusFilter].color}22`, color: STATUS_META[statusFilter].color }}
-          >
-            {STATUS_META[statusFilter].label} ✕
-          </button>
-        )}
+        {statusFilter &&
+          (() => {
+            const fm =
+              statusFilter === "inactive"
+                ? { label: "미실행", color: "#94a3b8" }
+                : STATUS_META[statusFilter];
+            return (
+              <button
+                onClick={() => setStatusFilter(null)}
+                className="shrink-0 rounded-full px-2 py-1 text-[11px] font-semibold"
+                style={{ backgroundColor: `${fm.color}22`, color: fm.color }}
+              >
+                {fm.label} ✕
+              </button>
+            );
+          })()}
       </div>
       <Scroll className="min-h-0 flex-1">
         <table className="w-full text-left text-xs">
@@ -188,13 +200,21 @@ function Row({
     >
       <td className="px-3 py-2">
         <div className="flex items-center gap-1.5">
-          <span
-            className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold"
-            style={{ backgroundColor: `${meta.color}1f`, color: meta.color }}
-          >
-            <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: meta.color }} />
-            {meta.label}
-          </span>
+          {c.virtual ? (
+            // 가상 = 미실행(전일 미복구 정지)
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-zinc-500/20 px-2 py-0.5 text-[11px] font-semibold text-zinc-300">
+              <span className="h-1.5 w-1.5 rounded-full bg-zinc-400" />
+              미실행
+            </span>
+          ) : (
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold"
+              style={{ backgroundColor: `${meta.color}1f`, color: meta.color }}
+            >
+              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: meta.color }} />
+              {meta.label}
+            </span>
+          )}
           {c.virtual && (
             <span className="rounded-full bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-violet-300">
               🧠 가상
@@ -249,7 +269,7 @@ function Row({
             c.kind === "dbproc" ? "bg-cyan-500/15 text-cyan-300" : "bg-violet-500/15 text-violet-300"
           }`}
         >
-          {c.kind === "dbproc" ? "PROC" : c.type}
+          {c.type}
         </span>
       </td>
       <td className="px-3 py-2">
