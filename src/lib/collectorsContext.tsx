@@ -227,14 +227,32 @@ export function CollectorsProvider({ children }: { children: ReactNode }) {
     setAlertConfigState((prev) => ({ ...prev, ...patch }));
 
   // 단일 하트비트 (모든 화면 공유) — 시뮬레이션 1틱 + 이력 누적
+  // 탭이 보이지 않으면(백그라운드/장시간 방치) 시뮬레이션을 멈춰 불필요한
+  // 재렌더·CPU 사용을 0으로 만든다 → 오래 켜둬도 누적 작업/랙이 생기지 않음.
   useEffect(() => {
-    const id = setInterval(() => {
-      if (!liveRef.current) return;
-      const { next, events } = tickCollectors(collectorsRef.current);
-      setCollectors(next);
-      if (events.length) setErrorEvents((p) => [...events, ...p].slice(0, 400));
-    }, 2000);
-    return () => clearInterval(id);
+    let id: ReturnType<typeof setInterval> | null = null;
+    const start = () => {
+      if (id !== null) return;
+      id = setInterval(() => {
+        if (!liveRef.current) return;
+        const { next, events } = tickCollectors(collectorsRef.current);
+        setCollectors(next);
+        if (events.length) setErrorEvents((p) => [...events, ...p].slice(0, 400));
+      }, 2000);
+    };
+    const stop = () => {
+      if (id !== null) {
+        clearInterval(id);
+        id = null;
+      }
+    };
+    const onVisibility = () => (document.visibilityState === "visible" ? start() : stop());
+    onVisibility();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, []);
 
   const injectFault = () => {

@@ -328,22 +328,27 @@ function GraphInner() {
     const prev = getViewport();
     const id = toast.loading("PDF 생성 중…");
     try {
-      const [{ toPng }, { jsPDF }] = await Promise.all([import("html-to-image"), import("jspdf")]);
+      const [{ toCanvas }, { jsPDF }] = await Promise.all([import("html-to-image"), import("jspdf")]);
       // 가상화(onlyRenderVisibleElements)로 화면 밖 노드는 DOM에 없으므로,
       // 전체를 맞춰 모두 렌더되게 한 뒤 한 박자 쉬고 캡처한다.
       fitView({ padding: 0.12, duration: 0, minZoom: 0.02 });
       await new Promise((r) => setTimeout(r, 450));
 
       const bounds = getNodesBounds(getNodes().filter((n) => !n.hidden));
-      const M = 48; // 이미지 여백(px)
-      const PX = Math.max(0.4, Math.min(2, 2400 / Math.max(1, bounds.width))); // 해상도 자동 조절
+      const M = 40; // 이미지 여백(px)
+      // 캡처 해상도(PX): 인쇄 선명도용. 캔버스 최대 크기(≈12000px) 넘지 않게 자동 하향.
+      const CAP = 12000;
+      let PX = Math.min(1.5, (CAP - M * 2) / Math.max(1, bounds.width), (CAP - M * 2) / Math.max(1, bounds.height));
+      PX = Math.max(0.5, PX);
       const imgW = Math.round(bounds.width * PX + M * 2);
       const imgH = Math.round(bounds.height * PX + M * 2);
 
-      const dataUrl = await toPng(vp, {
+      // 전체 토폴로지를 고해상도 마스터 캔버스로 1회 캡처
+      const master = await toCanvas(vp, {
         backgroundColor: "#0b0e14",
         width: imgW,
         height: imgH,
+        pixelRatio: 1,
         style: {
           width: `${imgW}px`,
           height: `${imgH}px`,
@@ -352,22 +357,59 @@ function GraphInner() {
         },
       });
 
-      // 전체 토폴로지를 A4 한 장에 꽉 차게(잘림 없이) 맞춤 — 비율에 따라 가로/세로 자동
-      const pdf = new jsPDF({ orientation: imgW >= imgH ? "landscape" : "portrait", unit: "pt", format: "a4" });
+      // A4 가로, 읽기 좋은 고정 배율로 바둑판식 분할(타일링)
+      const pdf = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
       const pageW = pdf.internal.pageSize.getWidth();
       const pageH = pdf.internal.pageSize.getHeight();
       const margin = 24;
-      const fit = Math.min((pageW - margin * 2) / imgW, (pageH - margin * 2) / imgH);
-      const w = imgW * fit;
-      const h = imgH * fit;
-      pdf.setFillColor(11, 14, 20); // 배경(앱과 동일) 채워 여백까지 통일
-      pdf.rect(0, 0, pageW, pageH, "F");
-      pdf.addImage(dataUrl, "PNG", (pageW - w) / 2, (pageH - h) / 2, w, h);
+      const contentW = pageW - margin * 2;
+      const contentH = pageH - margin * 2;
+
+      // 노드 1개(=230 flow px × PX)를 약 64pt 폭으로 인쇄 → 글자가 읽히는 밀도
+      let pxPerPt = (230 * PX) / 64;
+      // 페이지 수 폭주 방지(최대 30장): 초과 시 배율을 낮춰 글자만 조금 작게
+      const MAX_PAGES = 30;
+      const pageCountAt = (ppp: number) =>
+        Math.ceil(imgW / (contentW * ppp)) * Math.ceil(imgH / (contentH * ppp));
+      while (pxPerPt > 1.2 && pageCountAt(pxPerPt) > MAX_PAGES) pxPerPt *= 0.9;
+
+      const tileWpx = Math.floor(contentW * pxPerPt);
+      const tileHpx = Math.floor(contentH * pxPerPt);
+      const cols = Math.ceil(imgW / tileWpx);
+      const rows = Math.ceil(imgH / tileHpx);
+      const total = cols * rows;
+
+      const slice = document.createElement("canvas");
+      const sctx = slice.getContext("2d")!;
+      let page = 0;
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const sx = c * tileWpx;
+          const sy = r * tileHpx;
+          const sw = Math.min(tileWpx, imgW - sx);
+          const sh = Math.min(tileHpx, imgH - sy);
+          slice.width = sw;
+          slice.height = sh;
+          sctx.fillStyle = "#0b0e14";
+          sctx.fillRect(0, 0, sw, sh);
+          sctx.drawImage(master, sx, sy, sw, sh, 0, 0, sw, sh);
+          if (page > 0) pdf.addPage("a4", "landscape");
+          page++;
+          pdf.setFillColor(11, 14, 20);
+          pdf.rect(0, 0, pageW, pageH, "F");
+          // 모든 페이지 동일 배율 → 출력물을 이어 붙이면 전체 토폴로지가 됨
+          pdf.addImage(slice.toDataURL("image/png"), "PNG", margin, margin, sw / pxPerPt, sh / pxPerPt);
+          pdf.setFontSize(8);
+          pdf.setTextColor(120, 130, 140);
+          pdf.text(`R${r + 1}-C${c + 1}   p.${page}/${total}`, margin, pageH - 10);
+        }
+      }
+
       const d = new Date();
       const p2 = (n: number) => String(n).padStart(2, "0");
       const label = VIEWS.find((x) => x.v === view)?.label ?? "전체";
       pdf.save(`통신토폴로지_${label}_${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}.pdf`);
-      toast.success("통신 토폴로지 PDF 저장됨", { id });
+      toast.success(`통신 토폴로지 PDF 저장됨 · ${total}페이지`, { id });
     } catch {
       toast.error("PDF 생성 실패", { id });
     } finally {
